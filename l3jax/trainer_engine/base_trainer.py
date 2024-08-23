@@ -6,10 +6,10 @@ import optax
 from typing import Any, Dict, Tuple
 
 class BaseTrainer:
-    def __init__(self, model, optimizer, config):
+    def __init__(self, model, optimizer, training_config):
         self.model = model
         self.optimizer = optimizer
-        self.config = config
+        self.training_config = training_config
 
     def create_train_state(self, rng):
         """Initialize the train state."""
@@ -34,7 +34,7 @@ class BaseTrainer:
 
     def train_and_eval(self, train_loader, eval_loader=None, num_epochs=1):
         """Interleaves training and evaluation."""
-        rng = jax.random.PRNGKey(self.config.seed)
+        rng = jax.random.PRNGKey(self.training_config.seed)
         state = self.create_train_state(rng)
 
         for epoch in range(num_epochs):
@@ -45,7 +45,7 @@ class BaseTrainer:
                 eval_metrics = self.evaluate_model(state, eval_loader)
                 print(f"Epoch {epoch+1}/{num_epochs} - Eval metrics: {eval_metrics}")
 
-            if (epoch + 1) % self.config.save_every == 0:
+            if (epoch + 1) % self.training_config.save_every == 0:
                 self.save_checkpoint(state, f"checkpoint_epoch_{epoch+1}.ckpt")
 
         return state
