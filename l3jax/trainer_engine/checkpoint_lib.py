@@ -1,15 +1,15 @@
 import os
-from ml_collections import ConfigDict
-import jax
-import flax
-from flax.serialization import from_bytes, to_bytes, to_state_dict, from_state_dict
-from flax.traverse_util import flatten_dict, unflatten_dict, empty_node
-import msgpack
 
-from . import config_lib
+import flax
+import jax
+import msgpack
+from flax.serialization import from_bytes, from_state_dict, to_bytes, to_state_dict
+from flax.traverse_util import empty_node, flatten_dict, unflatten_dict
+from ml_collections import ConfigDict
+
+from . import config_lib, utils
 from .config_lib import config_dict
-from . import utils
-from .utils import tree_apply, float_tensor_to_dtype
+from .utils import float_tensor_to_dtype, tree_apply
 
 
 class Checkpointer(object):

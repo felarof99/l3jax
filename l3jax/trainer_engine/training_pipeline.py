@@ -1,98 +1,107 @@
 # Standard library imports
+import enum
+import functools
 import os
 import pdb
-import enum
 import re
 import string
-from dataclasses import dataclass
-import functools
-from functools import partial
-from typing import Any, List, Dict, Tuple, Optional, Union, Sequence, Mapping
-
-# Third-party imports
-import numpy as np
-from tqdm import tqdm, trange
-from transformers import AutoTokenizer
-
-# JAX and related libraries
-import jax
-import jax.numpy as jnp
-import flax
-import flax.linen as nn
-from flax.training import train_state
-from flax.core.meta import unbox
-from flax.serialization import from_bytes, to_bytes, to_state_dict, from_state_dict
-from flax.training.train_state import TrainState
-import optax
-
-# JAX model partitioning and sharding
-from jax.sharding import Mesh, NamedSharding
-from jax.sharding import PartitionSpec as PS
-from jax.experimental import mesh_utils
-from jax.experimental.pjit import pjit
-
-# Local imports
-
-from . import utils
-from .utils import cross_entropy_loss_and_accuracy
-from . import llama_model
-from . import checkpoint_lib
-
-# Less common imports
-import torch
 
 # create a base abstract class for the model called FelafaxModule. It should contain functions like setup, train step, eval step , svae checkpoint and load checkpoint and compute loss.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Tuple
-import jax.numpy as jnp
-from flax import struct
+from functools import partial
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from flax.training import train_state
+import chex
+import flax
+import flax.linen as nn
+
+# JAX and related libraries
+import jax
+import jax.numpy as jnp
+
+# Third-party imports
+import numpy as np
 import optax
 
+# Less common imports
+import torch
+from flax import struct
+from flax.core.meta import unbox
+from flax.serialization import from_bytes, from_state_dict, to_bytes, to_state_dict
+from flax.training import train_state
+from flax.training.train_state import TrainState
+from jax.experimental import mesh_utils
+from jax.experimental.pjit import pjit
 
-class FelafaxState(train_state.TrainState):
-    config: Any
-    model: Any
+# JAX model partitioning and sharding
+from jax.sharding import Mesh, NamedSharding
+from jax.sharding import PartitionSpec as PS
+from tqdm import tqdm, trange
+from transformers import AutoTokenizer
+
+from . import checkpoint_lib, llama_model, utils
+from .utils import cross_entropy_loss_and_accuracy
+
+# Local imports
 
 
-class FelafaxModule(ABC):
+@chex.dataclass(frozen=True)
+class FxTrainingConfig:
+    """Configures training pipeline."""
+
+    learning_rate: float = 1e-4
+    num_epochs: int = 1
+    max_steps: int | None = 5
+    batch_size: int = 32
+    max_length: int = 64
+    dataset_size_limit: int | None = 512
+    print_every_n_steps: int = 1
+
+
+class FxTrainState(train_state.TrainState):
+    """Stores training state."""
+
+    training_config: FxTrainingConfig
+    felafax_module: "FxModule"
+
+
+class FxModule(ABC):
     @staticmethod
     @abstractmethod
-    def setup(config: Any) -> FelafaxState:
+    def setup(config: Any) -> FxTrainState:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
-    def create_train_state(rng: Any, config: Any) -> FelafaxState:
+    def create_train_state(rng: Any, config: Any) -> FxTrainState:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
     def train_step(
-        state: FelafaxState, rng: Any, batch: Any
-    ) -> Tuple[FelafaxState, Any, dict]:
+        state: FxTrainState, rng: Any, batch: Any
+    ) -> Tuple[FxTrainState, Any, dict]:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
-    def eval_step(state: FelafaxState, batch: Any) -> Tuple[float, float]:
+    def eval_step(state: FxTrainState, batch: Any) -> Tuple[float, float]:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
-    def compute_loss(state: FelafaxState, batch: Any) -> float:
+    def compute_loss(state: FxTrainState, batch: Any) -> float:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
-    def save_checkpoint(state: FelafaxState, path: str, checkpointer: Any) -> None:
+    def save_checkpoint(state: FxTrainState, path: str, checkpointer: Any) -> None:
         raise NotImplementedError()
 
     @staticmethod
     @abstractmethod
-    def load_checkpoint(path: str, seq_length: int, checkpointer: Any) -> FelafaxState:
+    def load_checkpoint(path: str, seq_length: int, checkpointer: Any) -> FxTrainState:
         raise NotImplementedError()
 
 
@@ -100,18 +109,22 @@ class FelafaxModule(ABC):
 # LlamaModel class implementation
 # now create llama model class that inherits from FelafaxModule
 ########################################################################
-class LlamaModel(FelafaxModule):
+class FxLlamaModel(FxModule):
     @staticmethod
-    def setup(config: Any) -> FelafaxState:
-        return LlamaModel.create_train_state(jax.random.PRNGKey(0), config)
+    def setup(training_config: FxTrainingConfig) -> FxTrainState:
+        return FxLlamaModel.create_train_state(jax.random.PRNGKey(0), training_config)
 
     @staticmethod
-    def create_train_state(rng: Any, config: Any) -> FelafaxState:
+    def create_train_state(rng: Any, config: Any) -> FxTrainState:
         llama_config = llama_model.LlamaConfig()
-        model = llama_model.LlamaModel(llama_config)
-        params = LlamaModel._init_params(rng, config.seq_length, model)
-        tx = optax.adam(learning_rate=config.learning_rate)
-        return FelafaxState.create(
+        model = llama_model.CausalLlamaModule(
+            llama_config,
+            dtype=jnp.float32,
+            param_dtype=jnp.float32,
+        )
+        params = FxLlamaModel._init_params(rng, config.seq_length, model)
+        tx = optax.sgd(training_cfg.learning_rate)
+        return FxTrainState.create(
             apply_fn=model.apply, params=params, tx=tx, config=config, model=model
         )
 
@@ -127,8 +140,8 @@ class LlamaModel(FelafaxModule):
 
     @staticmethod
     def train_step(
-        state: FelafaxState, rng: Any, batch: Any
-    ) -> Tuple[FelafaxState, Any, dict]:
+        state: FxTrainState, rng: Any, batch: Any
+    ) -> Tuple[FxTrainState, Any, dict]:
         rng_generator = utils.NextRNG(rng)
         batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
 
@@ -150,7 +163,7 @@ class LlamaModel(FelafaxModule):
         return new_state, rng_generator(), metrics
 
     @staticmethod
-    def eval_step(state: FelafaxState, batch: Any) -> Tuple[float, float]:
+    def eval_step(state: FxTrainState, batch: Any) -> Tuple[float, float]:
         logits = state.apply_fn(
             state.params,
             batch["input_tokens"],
@@ -161,17 +174,17 @@ class LlamaModel(FelafaxModule):
         )
 
     @staticmethod
-    def compute_loss(state: FelafaxState, batch: Any) -> float:
-        return LlamaModel.eval_step(state, batch)[0]  # Return only the loss
+    def compute_loss(state: FxTrainState, batch: Any) -> float:
+        return FxLlamaModel.eval_step(state, batch)[0]  # Return only the loss
 
     @staticmethod
-    def save_checkpoint(state: FelafaxState, path: str, checkpointer: Any) -> None:
+    def save_checkpoint(state: FxTrainState, path: str, checkpointer: Any) -> None:
         checkpointer.save_trainstate_checkpoint(state, path)
 
     @staticmethod
-    def load_checkpoint(path: str, seq_length: int, checkpointer: Any) -> FelafaxState:
+    def load_checkpoint(path: str, seq_length: int, checkpointer: Any) -> FxTrainState:
         config = llama_model.LlamaConfig()  # You might want to load this from somewhere
-        dummy_state = LlamaModel.create_train_state(jax.random.PRNGKey(0), config)
+        dummy_state = FxLlamaModel.create_train_state(jax.random.PRNGKey(0), config)
         state_shapes = jax.eval_shape(lambda: dummy_state)
         state_shapes_partitioned = utils.match_partition_rules(
             llama_model.LlamaConfig.get_partition_rules(), state_shapes
@@ -183,7 +196,7 @@ class LlamaModel(FelafaxModule):
             path, state_shapes, shard_fns
         )
         if restored_params is not None:
-            return FelafaxState.create(
+            return FxTrainState.create(
                 apply_fn=dummy_state.apply_fn,
                 params=restored_params,
                 tx=dummy_state.tx,
@@ -193,13 +206,34 @@ class LlamaModel(FelafaxModule):
         return dummy_state
 
 
+import functools
+from typing import Any
+
+########################################################################
+# Trainer class implementation
+# Felafax trainer class that takes in a model and config and sets up the training loop
+########################################################################
+import jax
+import jax.numpy as jnp
+import optax
+from flax.training import train_state
+from jax.experimental import mesh_utils
+from jax.experimental.pjit import pjit
+from jax.sharding import Mesh, NamedSharding
+
+from . import checkpoint_lib, llama_model, utils
+
+
 class Trainer:
-    def __init__(self, model: FelafaxModule, config: Any):
+    def __init__(self, model: FxModule, config: Any):
         self.model = model
         self.config = config
         self.mesh = None
         self.state = None
         self.sharded_train_step = None
+        self.sharded_create_train_state = None
+        self.shard_fns = None
+        self.gather_fns = None
 
     def setup(self):
         utils.init_rng(self.config.seed)
@@ -208,7 +242,8 @@ class Trainer:
         device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
         self.mesh = Mesh(devices=device_mesh, axis_names=("dp", "fsdp", "mp"))
 
-        state_shapes = self.model._get_state_shapes(self.config.max_length)
+        dummy_state = self.model.create_train_state(jax.random.PRNGKey(0), self.config)
+        state_shapes = jax.eval_shape(lambda: dummy_state)
         state_shapes_partitioned = utils.match_partition_rules(
             llama_model.LlamaConfig.get_partition_rules(), state_shapes
         )
@@ -218,24 +253,32 @@ class Trainer:
         )
 
         self.sharded_train_step = self._get_sharded_train_step(state_shapes_partitioned)
-        self.sharded_create_trainstate = self._get_sharded_create_trainstate(
+        self.sharded_create_train_state = self._get_sharded_create_train_state(
             state_shapes_partitioned
         )
 
     def _get_sharded_train_step(self, state_partitioned):
         return pjit(
             self.model.train_step,
-            in_shardings=(state_partitioned, PS(), PS()),
-            out_shardings=(state_partitioned, PS(), PS()),
+            in_shardings=(
+                state_partitioned,
+                jax.sharding.PartitionSpec(),
+                jax.sharding.PartitionSpec(),
+            ),
+            out_shardings=(
+                state_partitioned,
+                jax.sharding.PartitionSpec(),
+                jax.sharding.PartitionSpec(),
+            ),
             donate_argnums=(0, 1),
         )
 
-    def _get_sharded_create_trainstate(self, state_partitioned):
+    def _get_sharded_create_train_state(self, state_partitioned):
         return pjit(
-            create_trainstate_from_params,
-            in_shardings=(state_partitioned.params,),
+            self.model.create_train_state,
+            in_shardings=(jax.sharding.PartitionSpec(), jax.sharding.PartitionSpec()),
             out_shardings=state_partitioned,
-            static_argnums=(1, 2),
+            static_argnums=(1,),
         )
 
     def train_and_eval(self, train_dataloader, eval_dataloader, checkpointer):
@@ -246,15 +289,17 @@ class Trainer:
                 )
             else:
                 # Initialize state if not loading from checkpoint
-                rng = jax.random.PRNGKey(0)
-                self.state = self.model._init_fn(rng, self.config.max_length)
+                self.state = self.sharded_create_train_state(
+                    jax.random.PRNGKey(0), self.config
+                )
 
             for epoch in range(self.config.num_epochs):
                 print(f"Starting epoch {epoch} of training...")
 
                 for step, train_batch in enumerate(train_dataloader):
                     train_batch = jax.device_put(
-                        train_batch, NamedSharding(self.mesh, PS())
+                        train_batch,
+                        NamedSharding(self.mesh, jax.sharding.PartitionSpec()),
                     )
                     sharded_rng = utils.next_rng()
 
@@ -288,7 +333,9 @@ class Trainer:
         num_batches = 0
 
         for eval_batch in eval_dataloader:
-            eval_batch = jax.device_put(eval_batch, NamedSharding(self.mesh, PS()))
+            eval_batch = jax.device_put(
+                eval_batch, NamedSharding(self.mesh, jax.sharding.PartitionSpec())
+            )
             loss, accuracy = self.model.eval_step(self.state, eval_batch)
             total_loss += loss
             total_accuracy += accuracy
@@ -301,151 +348,196 @@ class Trainer:
 
     def export(self, export_path):
         # Implement model export logic here
-        # This could involve converting the model to a specific format,
-        # saving it in a deployable state, etc.
-        pass
-
-
-def init_fn(rng, model, seq_length, optimizer):
-    rng_generator = utils.NextRNG(rng)
-    params = model.init(
-        input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
-        position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
-        attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
-        rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
-    )
-    return TrainState.create(params=params, tx=optimizer, apply_fn=model.apply)
-
-
-def get_state_shapes(model, seq_length, optimizer):
-    return jax.eval_shape(
-        functools.partial(
-            init_fn,
-            rng=jax.random.PRNGKey(0),
-            model=model,
-            seq_length=seq_length,
-            optimizer=optimizer,
+        checkpointer = checkpoint_lib.Checkpointer(
+            checkpoint_lib.Checkpointer.get_default_config(),
+            checkpoint_dir=os.path.dirname(export_path),
+            enable_checkpointer=jax.process_index() == 0,
         )
-    )
-
-
-def create_trainstate_from_params(params, model_apply_fn, optimizer):
-    return TrainState.create(params=params, apply_fn=model_apply_fn, tx=optimizer)
-
-
-def get_sharded_create_trainstate_from_params(state_partitioned):
-    return pjit(
-        create_trainstate_from_params,
-        in_shardings=(state_partitioned.params,),
-        out_shardings=state_partitioned,
-        static_argnums=(1, 2),
-        # donate_argnums=(0, ),
-    )
-
-
-def train_step(state, rng, batch):
-    rng_generator = utils.NextRNG(rng)
-    batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
-
-    def loss_and_accuracy(params):
-        logits = state.apply_fn(
-            params,
-            batch["input_tokens"],
-            deterministic=False,
-            rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
-        ).logits
-        return utils.cross_entropy_loss_and_accuracy(
-            logits, batch["target_tokens"], batch["loss_masks"]
+        checkpointer.save_train_state_to_file(
+            train_state=self.state,
+            gather_fns=self.gather_fns,
+            path=export_path,
         )
 
-    grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
-    (loss, accuracy), grads = grad_fn(state.params)
-    state = state.apply_gradients(grads=grads)
-    metrics = dict(
-        loss=loss,
-        accuracy=accuracy,
-    )
-    return state, rng_generator(), metrics
 
+# Usage example (to be placed in llama3.1_train.py or similar):
+def main():
+    training_cfg = FxTrainingConfig()
 
-def get_sharded_train_step(state_partitioned):
-    return pjit(
-        functools.partial(train_step),
-        in_shardings=(state_partitioned, PS(), PS()),
-        out_shardings=(state_partitioned, PS(), PS()),
-        donate_argnums=(0, 1),
-    )
+    # Initialize model
+    llama_config = llama_model.LlamaConfig.get_standard_llama_config("llama3_8b")
+    llama_config = llama_model.LlamaConfig.finalize_config(llama_config)
+    model = FxLlamaModel(llama_config, dtype=jnp.float32, param_dtype=jnp.float32)
 
+    # Initialize trainer
+    trainer = Trainer(model, training_cfg)
+    trainer.setup()
 
-def train_loop(
-    *,
-    model: Any,
-    optimizer: optax.GradientTransformation,
-    train_dataloader: torch.utils.data.DataLoader,
-    tokenizer: AutoTokenizer,
-    training_cfg: Any,
-    mesh: Mesh,
-    model_path: str,
-    checkpointer: checkpoint_lib.Checkpointer,
-) -> train_state.TrainState:
-    # initalizes rng generator in utils
-    utils.init_rng(99)
-    utils.next_rng()
-
-    devices = jax.devices()
-    device_count = len(devices)
-    device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
-    mesh = Mesh(devices=device_mesh, axis_names=("dp", "fsdp", "mp"))
-
-    state_shapes = get_state_shapes(model, training_cfg.max_length, optimizer)
-
-    state_shapes_partitioned = utils.match_partition_rules(
-        llama_model.LlamaConfig.get_partition_rules(), state_shapes
+    # Prepare dataset
+    train_dataloader, val_dataloader = get_dataset(
+        tokenizer=tokenizer,
+        max_length=training_cfg.max_length,
+        max_examples=training_cfg.dataset_size_limit,
     )
 
-    shard_fns, gather_fns = utils.make_shard_and_gather_fns(
-        state_shapes_partitioned, state_shapes
+    # Initialize checkpointer
+    checkpointer = checkpoint_lib.Checkpointer(
+        checkpoint_lib.Checkpointer.get_default_config(),
+        checkpoint_dir=os.path.dirname(model_path),
+        enable_checkpointer=jax.process_index() == 0,
     )
 
-    sharded_train_step = get_sharded_train_step(state_shapes_partitioned)
-    sharded_create_trainstate_from_params = get_sharded_create_trainstate_from_params(
-        state_shapes_partitioned
-    )
+    # Train the model
+    trainer.train_and_eval(train_dataloader, val_dataloader, checkpointer)
 
-    with mesh:
-        state, restored_params = None, None
+    # Export the model
+    trainer.export(os.path.join(model_path, "trained_llama.flax"))
 
-        print("Loading llama JAX model...")
-        state, restored_params = checkpointer.load_trainstate_checkpoint(
-            "flax_params::" + model_path, state_shapes, shard_fns
-        )
-        if restored_params is not None:
-            state = sharded_create_trainstate_from_params(
-                restored_params, model.apply, optimizer
-            )
-            del restored_params
-        else:
-            raise ValueError("Failed to load checkpoint")
 
-        for epoch in range(training_cfg.num_epochs):
-            print(f"Starting epoch {epoch} of training...")
+if __name__ == "__main__":
+    main()
 
-            for step, train_batch in enumerate(train_dataloader):
-                # Place the batch on the appropriate devices
-                train_batch = jax.device_put(train_batch, NamedSharding(mesh, PS()))
 
-                sharded_rng = utils.next_rng()
+# def init_fn(rng, model, seq_length, optimizer):
+#     rng_generator = utils.NextRNG(rng)
+#     params = model.init(
+#         input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
+#         position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
+#         attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
+#         rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
+#     )
+#     return TrainState.create(params=params, tx=optimizer, apply_fn=model.apply)
 
-                # Perform a single training step
-                state, sharded_rng, metrics = sharded_train_step(
-                    state, sharded_rng, train_batch
-                )
 
-                if step % training_cfg.print_every_n_steps == 0:
-                    print(
-                        f"Epoch {epoch}, Step {step}, Train Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.4f}"
-                    )
+# def get_state_shapes(model, seq_length, optimizer):
+#     return jax.eval_shape(
+#         functools.partial(
+#             init_fn,
+#             rng=jax.random.PRNGKey(0),
+#             model=model,
+#             seq_length=seq_length,
+#             optimizer=optimizer,
+#         )
+#     )
 
-                if training_cfg.max_steps and step >= training_cfg.max_steps:
-                    break
-        return state, gather_fns
+
+# def create_trainstate_from_params(params, model_apply_fn, optimizer):
+#     return TrainState.create(params=params, apply_fn=model_apply_fn, tx=optimizer)
+
+
+# def get_sharded_create_trainstate_from_params(state_partitioned):
+#     return pjit(
+#         create_trainstate_from_params,
+#         in_shardings=(state_partitioned.params,),
+#         out_shardings=state_partitioned,
+#         static_argnums=(1, 2),
+#         # donate_argnums=(0, ),
+#     )
+
+
+# def train_step(state, rng, batch):
+#     rng_generator = utils.NextRNG(rng)
+#     batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
+
+#     def loss_and_accuracy(params):
+#         logits = state.apply_fn(
+#             params,
+#             batch["input_tokens"],
+#             deterministic=False,
+#             rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
+#         ).logits
+#         return utils.cross_entropy_loss_and_accuracy(
+#             logits, batch["target_tokens"], batch["loss_masks"]
+#         )
+
+#     grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
+#     (loss, accuracy), grads = grad_fn(state.params)
+#     state = state.apply_gradients(grads=grads)
+#     metrics = dict(
+#         loss=loss,
+#         accuracy=accuracy,
+#     )
+#     return state, rng_generator(), metrics
+
+
+# def get_sharded_train_step(state_partitioned):
+#     return pjit(
+#         functools.partial(train_step),
+#         in_shardings=(state_partitioned, PS(), PS()),
+#         out_shardings=(state_partitioned, PS(), PS()),
+#         donate_argnums=(0, 1),
+#     )
+
+
+# def train_loop(
+#     *,
+#     model: Any,
+#     optimizer: optax.GradientTransformation,
+#     train_dataloader: torch.utils.data.DataLoader,
+#     tokenizer: AutoTokenizer,
+#     training_cfg: Any,
+#     mesh: Mesh,
+#     model_path: str,
+#     checkpointer: checkpoint_lib.Checkpointer,
+# ) -> train_state.TrainState:
+#     # initalizes rng generator in utils
+#     utils.init_rng(99)
+#     utils.next_rng()
+
+#     devices = jax.devices()
+#     device_count = len(devices)
+#     device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
+#     mesh = Mesh(devices=device_mesh, axis_names=("dp", "fsdp", "mp"))
+
+#     state_shapes = get_state_shapes(model, training_cfg.max_length, optimizer)
+
+#     state_shapes_partitioned = utils.match_partition_rules(
+#         llama_model.LlamaConfig.get_partition_rules(), state_shapes
+#     )
+
+#     shard_fns, gather_fns = utils.make_shard_and_gather_fns(
+#         state_shapes_partitioned, state_shapes
+#     )
+
+#     sharded_train_step = get_sharded_train_step(state_shapes_partitioned)
+#     sharded_create_trainstate_from_params = get_sharded_create_trainstate_from_params(
+#         state_shapes_partitioned
+#     )
+
+#     with mesh:
+#         state, restored_params = None, None
+
+#         print("Loading llama JAX model...")
+#         state, restored_params = checkpointer.load_trainstate_checkpoint(
+#             "flax_params::" + model_path, state_shapes, shard_fns
+#         )
+#         if restored_params is not None:
+#             state = sharded_create_trainstate_from_params(
+#                 restored_params, model.apply, optimizer
+#             )
+#             del restored_params
+#         else:
+#             raise ValueError("Failed to load checkpoint")
+
+#         for epoch in range(training_cfg.num_epochs):
+#             print(f"Starting epoch {epoch} of training...")
+
+#             for step, train_batch in enumerate(train_dataloader):
+#                 # Place the batch on the appropriate devices
+#                 train_batch = jax.device_put(train_batch, NamedSharding(mesh, PS()))
+
+#                 sharded_rng = utils.next_rng()
+
+#                 # Perform a single training step
+#                 state, sharded_rng, metrics = sharded_train_step(
+#                     state, sharded_rng, train_batch
+#                 )
+
+#                 if step % training_cfg.print_every_n_steps == 0:
+#                     print(
+#                         f"Epoch {epoch}, Step {step}, Train Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.4f}"
+#                     )
+
+#                 if training_cfg.max_steps and step >= training_cfg.max_steps:
+#                     break
+#         return state, gather_fns

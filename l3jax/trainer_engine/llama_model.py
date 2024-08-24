@@ -1,24 +1,22 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
+import einops
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax.sharding import PartitionSpec as PS
-import flax.linen as nn
+import numpy as np
 from flax.core.frozen_dict import FrozenDict, freeze, unfreeze
 from flax.linen import combine_masks, make_causal_mask
 from flax.linen.attention import dot_product_attention_weights
 from flax.traverse_util import flatten_dict, unflatten_dict
-import einops
-
+from jax.sharding import PartitionSpec as PS
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_flax_outputs import FlaxBaseModelOutput, FlaxCausalLMOutput
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
-from . import utils
-from .utils import with_sharding_constraint
-from . import config_lib
+from . import config_lib, utils
 from .config_lib import config_dict
+from .utils import with_sharding_constraint
 
 
 class LlamaConfig(object):
@@ -86,7 +84,6 @@ class LlamaConfig(object):
         # This is where you get pretrained config from huggingface merged with your updates.
         return PretrainedConfig.from_dict(standard_config)
 
-
     @staticmethod
     def rng_keys():
         return ("params", "dropout", "fcm")
@@ -141,6 +138,7 @@ class RMSNorm(nn.Module):
         weight = jnp.asarray(self.weight, self.dtype)
         return output * weight
 
+
 def apply_rotary_emb(
     xq: jnp.ndarray,
     xk: jnp.ndarray,
@@ -178,11 +176,13 @@ def apply_rotary_emb(
     )
     return xq_out.astype(input_dtype), xk_out.astype(input_dtype)
 
+
 class Attention(nn.Module):
     """
     Attention module for the LLaMA model.
     Implements multi-head attention with support for grouped-query attention.
     """
+
     config: PretrainedConfig
     dtype: jnp.dtype = jnp.float32
     param_dtype: jnp.dtype = jnp.float32
@@ -300,7 +300,7 @@ class Attention(nn.Module):
                 jnp.ones((1, self.config.max_position_embeddings), dtype="bool"),
                 dtype="bool",
             )
-            
+
         causal_mask = full_causal_mask[:, :, :query_length, :key_length]
 
         # Broadcast causal mask to batch size
@@ -357,6 +357,7 @@ class Attention(nn.Module):
         outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
         return outputs
 
+
 class FeedForward(nn.Module):
     config: PretrainedConfig
     dtype: jnp.dtype = jnp.float32
@@ -401,6 +402,7 @@ class FeedForward(nn.Module):
         x = self.w2(nn.silu(self.w1(x)) * self.w3(x))
         x = self.dropout(x, deterministic=deterministic)
         return x
+
 
 class TransformerBlock(nn.Module):
     config: PretrainedConfig
@@ -470,6 +472,7 @@ class TransformerBlock(nn.Module):
 
         return (hidden_states,) + attn_outputs[1:]
 
+
 class TransformerBlockCollection(nn.Module):
     config: PretrainedConfig
     dtype: jnp.dtype = jnp.float32
@@ -526,6 +529,7 @@ class TransformerBlockCollection(nn.Module):
         outputs = (hidden_states, all_hidden_states, all_attentions)
 
         return outputs
+
 
 class LlamaModule(nn.Module):
     config: PretrainedConfig
@@ -601,6 +605,7 @@ class LlamaModule(nn.Module):
             hidden_states=outputs[1],
             attentions=outputs[-1],
         )
+
 
 class CausalLlamaModule(nn.Module):
     config: PretrainedConfig

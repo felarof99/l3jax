@@ -7,19 +7,21 @@ import sys
 # Add the current directory to the Python path
 sys.path.append("")
 
-# Import necessary modules
-from . import setup, utils, llama_model, checkpoint_lib, training_pipeline
-from huggingface_hub import snapshot_download
-from transformers import AutoConfig, AutoTokenizer
-from datasets import load_dataset
-from torch.utils.data import DataLoader
+from typing import Any, Dict, List
+
+import chex
 import jax
 import jax.numpy as jnp
 import optax
+from datasets import load_dataset
+from huggingface_hub import snapshot_download
 from jax.experimental import mesh_utils
 from jax.sharding import Mesh
-import chex
-from typing import List, Dict, Any
+from torch.utils.data import DataLoader
+from transformers import AutoConfig, AutoTokenizer
+
+# Import necessary modules
+from . import checkpoint_lib, llama_model, setup, training_pipeline, utils
 
 # Setup environment
 setup.setup_environment()
@@ -126,6 +128,8 @@ def test_dataset_pipeline(tokenizer):
     batch = next(iter(train_loader))
     print("Input tokens shape:", batch["input_tokens"].shape)
     print("Target mask shape:", batch["target_tokens"].shape)
+
+
 test_dataset_pipeline(tokenizer)
 
 
@@ -169,9 +173,9 @@ train_dataloader, val_dataloader = get_dataset(
 model_path = os.path.join(model_path, "llama3.1_8b_serialized.flax")
 
 checkpointer = checkpoint_lib.Checkpointer(
-        checkpoint_lib.Checkpointer.get_default_config(),
-        checkpoint_dir=os.path.dirname(model_path),
-        enable_checkpointer=jax.process_index() == 0,
+    checkpoint_lib.Checkpointer.get_default_config(),
+    checkpoint_dir=os.path.dirname(model_path),
+    enable_checkpointer=jax.process_index() == 0,
 )
 
 # Train the model
