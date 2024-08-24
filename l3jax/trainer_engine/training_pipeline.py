@@ -36,7 +36,6 @@ from jax.sharding import PartitionSpec as PS
 from tqdm import tqdm, trange
 from transformers import AutoTokenizer
 
-from l3jax.llama3.1_train import llama_config
 from . import checkpoint_lib, llama_model, utils
 from .utils import cross_entropy_loss_and_accuracy
 
@@ -104,17 +103,14 @@ class Trainer:
         # Load checkpoint and create initial state
         with self.mesh:
             print("Loading llama JAX model...")
-            
+
             _, restored_params = self.checkpointer.load_trainstate_checkpoint(
-                "flax_params::" + self.model_ckpt_path, 
-                self.state_shapes,
+                "flax_params::" + self.model_ckpt_path, self.state_shapes,
                 self.shard_fns)
-            
+
             if restored_params is not None:
                 self.train_state = self.sharded_create_trainstate_from_params(
-                    restored_params, 
-                    self.model.apply, 
-                    self.optimizer)
+                    restored_params, self.model.apply, self.optimizer)
             else:
                 raise ValueError("Failed to load checkpoint")
 
@@ -209,11 +205,11 @@ class Trainer:
                             f"Epoch {epoch}, Step {step}, Train Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.4f}"
                         )
 
-                    if (self.training_config.max_steps and 
-                        step >= self.training_config.max_steps):
+                    if (self.training_config.max_steps
+                            and step >= self.training_config.max_steps):
                         break
             self.train_state = state
-        return state 
+        return state
 
     def save_model(self, state, gather_fns):
         self.checkpointer.save_train_state_to_file(

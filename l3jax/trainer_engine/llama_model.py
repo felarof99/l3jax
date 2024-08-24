@@ -20,12 +20,11 @@ from .config_lib import config_dict
 from .utils import with_sharding_constraint
 
 
-class LlamaConfig(object):
+class LlamaConfig:
     """Simplified LLaMA configuration."""
 
-    @classmethod
-    def get_standard_llama_config(cls, model_name):
-        base_config = {
+    def __init__(self, model_name):
+        self.base_config = {
             "base_model": "llama_test",
             "vocab_size": 32000,
             "hidden_size": 3200,
@@ -42,7 +41,7 @@ class LlamaConfig(object):
             "residue_dropout": 0.0,
         }
 
-        model_configs = {
+        self.model_configs = {
             "llama3_8b": {
                 "base_model": "llama3_8b",
                 "vocab_size": 128256,
@@ -69,28 +68,20 @@ class LlamaConfig(object):
             },
         }
 
-        config = config_dict()
-        config.update(base_config)
-        if model_name in model_configs:
-            config.update(model_configs[model_name])
-        return config
+        self.config = config_dict()
+        self.config.update(self.base_config)
+        if model_name in self.model_configs:
+            self.config.update(self.model_configs[model_name])
 
-    @classmethod
-    def finalize_config(cls, config):
+    def get_hf_pretrained_config(self, config):
         """Apply updates on top of standard base model config."""
-        standard_config = cls.get_standard_llama_config(config.base_model)
-        for key, value in config.items():
-            if value is not None:
-                standard_config[key] = value
         # This is where you get pretrained config from huggingface merged with your updates.
-        return PretrainedConfig.from_dict(standard_config)
+        return PretrainedConfig.from_dict(config)
 
-    @staticmethod
-    def rng_keys():
+    def rng_keys(self):
         return ("params", "dropout", "fcm")
 
-    @staticmethod
-    def get_partition_rules():
+    def get_partition_rules(self):
         """Parition rules for GPTJ. Note that these rules are orderd, so that
         the beginning rules match first. It is important to use
         PartitionSpec() instead of None here because JAX does not treat

@@ -15,12 +15,13 @@ import chex
 import jax
 import jax.numpy as jnp
 import optax
+import torch
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
 from jax.experimental import mesh_utils
 from jax.sharding import Mesh
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, default_data_collator
 
 # Import necessary modules
 from . import checkpoint_lib, llama_model, setup, training_pipeline, utils
@@ -75,19 +76,17 @@ def get_dataset(*, tokenizer, batch_size=1, seq_length=32, max_examples=None):
         return {"text": texts}
 
     def _tokenize(examples):
-        tokenized = tokenizer(
-            examples["text"],
-            truncation=True,
-            padding="max_length",
-            max_length=seq_length + 1,
-        )
+        tokenized = tokenizer(examples["text"],
+                              truncation=True,
+                              padding="max_length",
+                              max_length=seq_length + 1)
         return {
-            "input_tokens":
-            [input_id[:-1] for input_id in tokenized["input_ids"]],
-            "target_tokens":
-            [input_id[1:] for input_id in tokenized["input_ids"]],
-            "loss_masks":
-            [input_id[1:] for input_id in tokenized["attention_mask"]],
+            'input_tokens':
+            [input_id[:-1] for input_id in tokenized['input_ids']],
+            'target_tokens':
+            [input_id[1:] for input_id in tokenized['input_ids']],
+            'loss_masks':
+            [input_id[1:] for input_id in tokenized['attention_mask']]
         }
 
     def _custom_collate_fn(
@@ -99,8 +98,8 @@ def get_dataset(*, tokenizer, batch_size=1, seq_length=32, max_examples=None):
         collated = default_data_collator(batch)
         jax_batch = {}
         for key, value in collated.items():
-            jax_batch[key] = (jnp.array(value.numpy()) if isinstance(
-                value, torch.Tensor) else value)
+            jax_batch[key] = jnp.array(value.numpy()) if isinstance(
+                value, torch.Tensor) else value
 
         return jax_batch
 
@@ -112,7 +111,7 @@ def get_dataset(*, tokenizer, batch_size=1, seq_length=32, max_examples=None):
 
     # Create train and test dataset.
     ds = dataset.train_test_split(test_size=0.15)
-    for split in ["train", "test"]:
+    for split in ['train', 'test']:
         ds[split] = ds[split].map(_tokenize,
                                   batched=True,
                                   remove_columns=dataset.column_names)
@@ -121,8 +120,10 @@ def get_dataset(*, tokenizer, batch_size=1, seq_length=32, max_examples=None):
     dataloader_args = dict(shuffle=True,
                            batch_size=batch_size,
                            collate_fn=_custom_collate_fn)
-    train_dataloader = DataLoader(ds["train"], **dataloader_args)
-    test_dataloader = DataLoader(ds["test"], **dataloader_args)
+    train_dataloader = torch.utils.data.DataLoader(ds['train'],
+                                                   **dataloader_args)
+    test_dataloader = torch.utils.data.DataLoader(ds['test'],
+                                                  **dataloader_args)
 
     return train_dataloader, test_dataloader
 
@@ -134,8 +135,8 @@ def test_dataset_pipeline(tokenizer):
                                   seq_length=32,
                                   max_examples=512)
     batch = next(iter(train_loader))
-    print("Input tokens shape:", batch["input_tokens"].shape)
-    print("Target mask shape:", batch["target_tokens"].shape)
+    print("Input tokens shape:", batch['input_tokens'].shape)
+    print("Target mask shape:", batch['target_tokens'].shape)
 
 
 test_dataset_pipeline(tokenizer)
@@ -161,10 +162,11 @@ device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
 mesh = Mesh(devices=device_mesh, axis_names=("dp", "fsdp", "mp"))
 
 # Initialize model and optimizer
-llama_config = llama_model.LlamaConfig.get_standard_llama_config("llama3_8b")
-llama_config = llama_model.LlamaConfig.finalize_config(llama_config)
+llama_config = llama_model.LlamaConfig("llama3_8b")
+hf_pretrained_llama_config = llama_config.get_hf_pretrained_config(config)
+
 model = llama_model.CausalLlamaModule(
-    llama_config,
+    hf_pretrained_llama_config,
     dtype=jnp.float32,
     param_dtype=jnp.float32,
 )
