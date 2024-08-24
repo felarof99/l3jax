@@ -15,8 +15,10 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_flax_outputs import FlaxBaseModelOutput, FlaxCausalLMOutput
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
-from .utils import with_sharding_constraint
-from .config_lib import config_dict
+from . import utils
+from utils import with_sharding_constraint
+from . import config_lib
+from config_lib import config_dict
 
 
 class LlamaConfig(object):

@@ -6,9 +6,10 @@ from flax.serialization import from_bytes, to_bytes, to_state_dict, from_state_d
 from flax.traverse_util import flatten_dict, unflatten_dict, empty_node
 import msgpack
 
-from trainer_engine import config_lib
-from .config_lib import config_dict, update_config_dict
-from .utils import tree_apply, float_tensor_to_dtype
+from . import config_lib
+from config_lib import config_dict
+from . import utils
+from utils import tree_apply, float_tensor_to_dtype
 
 
 class Checkpointer(object):

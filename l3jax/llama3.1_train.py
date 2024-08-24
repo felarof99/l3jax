@@ -8,7 +8,7 @@ import sys
 sys.path.append("")
 
 # Import necessary modules
-from trainer_engine import setup, utils, llama_model, checkpoint_lib, training_pipeline
+from . import setup, utils, llama_model, checkpoint_lib, training_pipeline
 from huggingface_hub import snapshot_download
 from transformers import AutoConfig, AutoTokenizer
 from datasets import load_dataset
