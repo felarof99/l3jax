@@ -18,8 +18,8 @@ from .utils import float_tensor_to_dtype
 from . import config_lib
 
 config = config_lib.config_dict(
-    load_checkpoint='',
-    output_dir='',
+    load_checkpoint='trainstate::/mnt/persistent-disk/hf/models--felafax--llama-3.1-8B-JAX/snapshots/ebca17f216e4c02e0f31cc47264a9d65a4f5b9a9/trained_llama.flax',
+    output_dir='/mnt/persistent-disk/hf/models--felafax--llama-3.1-8B-JAX/snapshots/ebca17f216e4c02e0f31cc47264a9d65a4f5b9a9/hf/',
     llama=LLaMAConfigurator.get_standard_llama_config("llama3_8b"),
 )
 
@@ -35,6 +35,7 @@ def match_keywords(string, positives, negatives):
 
 def load_and_convert_checkpoint(path):
     _, flax_params = StreamingCheckpointer.load_trainstate_checkpoint(path)
+    import pdb; pdb.set_trace()
     flax_params = flatten_dict(flax_params['params'], sep='.')
     torch_params = {}
     for key, tensor in flax_params.items():
