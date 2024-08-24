@@ -17,10 +17,10 @@ from .checkpoint_lib import Checkpointer as StreamingCheckpointer
 from .utils import float_tensor_to_dtype
 from . import config_lib
 
-FLAGS, FLAGS_DEF = config_lib.define_flags_with_default(
-    # load_checkpoint='',
-    # output_dir='',
-    # llama=LLaMAConfigurator.get_default_config(),
+config = config_lib.config_dict(
+    load_checkpoint='',
+    output_dir='',
+    llama=LLaMAConfigurator.get_default_config(),
 )
 
 def match_keywords(string, positives, negatives):
@@ -68,7 +68,7 @@ def write_model(loaded, model_path):
     tmp_model_path = os.path.join(model_path, "tmp")
     os.makedirs(tmp_model_path, exist_ok=True)
 
-    llama_config = LLaMAConfigurator.finalize_config(FLAGS.llama)
+    llama_config = LLaMAConfigurator.finalize_config(config.llama)
 
     n_layers = llama_config.num_hidden_layers
     n_heads = llama_config.num_attention_heads
@@ -163,12 +163,12 @@ def write_model(loaded, model_path):
 
 
 def main(argv):
-    assert FLAGS.load_checkpoint != "" and FLAGS.output_dir != ""
+    assert config.load_checkpoint != "" and config.output_dir != ""
     write_model(
-        load_and_convert_checkpoint(FLAGS.load_checkpoint),
-        model_path=FLAGS.output_dir,
+        load_and_convert_checkpoint(config.load_checkpoint),
+        model_path=config.output_dir,
     )
 
 
 if __name__ == "__main__":
-    mlxu.run(main)
+    main([])
