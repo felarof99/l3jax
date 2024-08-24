@@ -126,9 +126,6 @@ def test_dataset_pipeline(tokenizer):
     batch = next(iter(train_loader))
     print("Input tokens shape:", batch["input_tokens"].shape)
     print("Target mask shape:", batch["target_tokens"].shape)
-
-
-# Test dataset pipeline
 test_dataset_pipeline(tokenizer)
 
 
@@ -171,8 +168,14 @@ train_dataloader, val_dataloader = get_dataset(
 # Update model path
 model_path = os.path.join(model_path, "llama3.1_8b_serialized.flax")
 
+checkpointer = checkpoint_lib.Checkpointer(
+        checkpoint_lib.Checkpointer.get_default_config(),
+        checkpoint_dir=os.path.dirname(model_path),
+        enable_checkpointer=jax.process_index() == 0,
+)
+
 # Train the model
-state = training_pipeline.train_loop(
+state, gather_fns = training_pipeline.train_loop(
     model=model,
     model_path=model_path,
     tokenizer=tokenizer,
@@ -180,4 +183,11 @@ state = training_pipeline.train_loop(
     train_dataloader=train_dataloader,
     training_cfg=training_cfg,
     mesh=mesh,
+)
+
+# Export the model
+checkpointer.save_train_state_to_file(
+    train_state=state,
+    gather_fns=gather_fns,
+    path=os.path.join(model_path, "trained_llama.flax"),
 )

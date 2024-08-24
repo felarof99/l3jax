@@ -111,7 +111,6 @@ def get_sharded_train_step(state_partitioned):
         donate_argnums=(0, 1),
     )
 
-
 def train_loop(
     *,
     model: Any,
@@ -121,6 +120,7 @@ def train_loop(
     training_cfg: Any,
     mesh: Mesh,
     model_path: str,
+    checkpointer: checkpoint_lib.Checkpointer,
 ) -> train_state.TrainState:
     # initalizes rng generator in utils
     utils.init_rng(99)
@@ -146,17 +146,11 @@ def train_loop(
         state_shapes_partitioned
     )
 
-    streaming_checkpointer = checkpoint_lib.Checkpointer(
-        checkpoint_lib.Checkpointer.get_default_config(),
-        checkpoint_dir=os.path.dirname(model_path),
-        enable_checkpointer=jax.process_index() == 0,
-    )
-
     with mesh:
         state, restored_params = None, None
         
         print("Loading llama JAX model...")
-        state, restored_params = streaming_checkpointer.load_trainstate_checkpoint(
+        state, restored_params = checkpointer.load_trainstate_checkpoint(
             "flax_params::" + model_path, state_shapes, shard_fns
         )
         if restored_params is not None:
@@ -188,4 +182,4 @@ def train_loop(
 
                 if training_cfg.max_steps and step >= training_cfg.max_steps:
                     break
-        return state
+        return state, gather_fns

@@ -64,7 +64,7 @@ class Checkpointer(object):
             path = os.path.join(self.checkpoint_dir, filename)
         else:
             path = "/dev/null"
-        config_lib.save_pickle(obj, f)
+        config_lib.save_pickle(obj, path)
 
     def save_all(
         self, train_state, gather_fns, metadata=None, dataset=None, milestone=False
@@ -101,7 +101,7 @@ class Checkpointer(object):
         if remove_dict_prefix is not None:
             remove_dict_prefix = tuple(remove_dict_prefix)
         flattend_train_state = {}
-        with config_lib.open_file(path) as fin: 
+        with config_lib.open_file(path) as fin:
             # 83886080 bytes = 80 MB, which is 16 blocks on GCS
             unpacker = msgpack.Unpacker(fin, read_size=83886080, max_buffer_size=0)
             for key, value in unpacker:
@@ -136,7 +136,7 @@ class Checkpointer(object):
         """Load a standard flax checkpoint that's not saved with the
         msgpack streaming format.
         """
-        with config_lib.open_file(path) as fin: 
+        with config_lib.open_file(path) as fin:
             encoded_bytes = fin.read()
 
         state_dict = flax.serialization.msgpack_restore(encoded_bytes)
