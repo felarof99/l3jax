@@ -3,7 +3,8 @@ import os
 import flax
 import jax
 import msgpack
-from flax.serialization import from_bytes, from_state_dict, to_bytes, to_state_dict
+from flax.serialization import (from_bytes, from_state_dict, to_bytes,
+                                to_state_dict)
 from flax.traverse_util import empty_node, flatten_dict, unflatten_dict
 from ml_collections import ConfigDict
 
@@ -40,12 +41,14 @@ class Checkpointer(object):
             path = os.path.join(self.checkpoint_dir, filename)
         else:
             path = "/dev/null"
-        self.save_train_state_to_file(
-            train_state, path, gather_fns, self.config.float_dtype
-        )
+        self.save_train_state_to_file(train_state, path, gather_fns,
+                                      self.config.float_dtype)
 
     @staticmethod
-    def save_train_state_to_file(train_state, path, gather_fns=None, float_dtype=None):
+    def save_train_state_to_file(train_state,
+                                 path,
+                                 gather_fns=None,
+                                 float_dtype=None):
         train_state = to_state_dict(train_state)
         packer = msgpack.Packer()
         flattend_train_state = flatten_dict(train_state)
@@ -66,9 +69,12 @@ class Checkpointer(object):
             path = "/dev/null"
         config_lib.save_pickle(obj, path)
 
-    def save_all(
-        self, train_state, gather_fns, metadata=None, dataset=None, milestone=False
-    ):
+    def save_all(self,
+                 train_state,
+                 gather_fns,
+                 metadata=None,
+                 dataset=None,
+                 milestone=False):
         step = int(jax.device_get(train_state.step))
         if self.config.save_optimizer_state:
             checkpoint_state = train_state
@@ -83,19 +89,20 @@ class Checkpointer(object):
             # Save a milestone checkpoint that will not be overwritten
             self.save_pickle(metadata, f"metadata_{step}.pkl")
             self.save_pickle(dataset, f"dataset_{step}.pkl")
-            self.save_checkpoint(
-                checkpoint_state, f"{checkpoint_name}_{step}", checkpoint_gather_fns
-            )
+            self.save_checkpoint(checkpoint_state, f"{checkpoint_name}_{step}",
+                                 checkpoint_gather_fns)
         else:
             # Save a normal checkpoint that can be overwritten
             self.save_pickle(metadata, "metadata.pkl")
             self.save_pickle(dataset, "dataset.pkl")
-            self.save_checkpoint(
-                checkpoint_state, f"{checkpoint_name}", checkpoint_gather_fns
-            )
+            self.save_checkpoint(checkpoint_state, f"{checkpoint_name}",
+                                 checkpoint_gather_fns)
 
     @staticmethod
-    def load_checkpoint(path, target=None, shard_fns=None, remove_dict_prefix=None):
+    def load_checkpoint(path,
+                        target=None,
+                        shard_fns=None,
+                        remove_dict_prefix=None):
         if shard_fns is not None:
             shard_fns = flatten_dict(to_state_dict(shard_fns))
         if remove_dict_prefix is not None:
@@ -103,12 +110,14 @@ class Checkpointer(object):
         flattend_train_state = {}
         with config_lib.open_file(path) as fin:
             # 83886080 bytes = 80 MB, which is 16 blocks on GCS
-            unpacker = msgpack.Unpacker(fin, read_size=83886080, max_buffer_size=0)
+            unpacker = msgpack.Unpacker(fin,
+                                        read_size=83886080,
+                                        max_buffer_size=0)
             for key, value in unpacker:
                 key = tuple(key)
                 if remove_dict_prefix is not None:
-                    if key[: len(remove_dict_prefix)] == remove_dict_prefix:
-                        key = key[len(remove_dict_prefix) :]
+                    if key[:len(remove_dict_prefix)] == remove_dict_prefix:
+                        key = key[len(remove_dict_prefix):]
                     else:
                         continue
 
@@ -118,9 +127,8 @@ class Checkpointer(object):
                 flattend_train_state[key] = tensor
 
         if target is not None:
-            flattened_target = flatten_dict(
-                to_state_dict(target), keep_empty_nodes=True
-            )
+            flattened_target = flatten_dict(to_state_dict(target),
+                                            keep_empty_nodes=True)
             for key, value in flattened_target.items():
                 if key not in flattend_train_state and value == empty_node:
                     flattend_train_state[key] = value
@@ -199,8 +207,9 @@ class Checkpointer(object):
             # Load the params in the standard flax format (non-streaming)
             # This requires the entire params to fit in memory
             restored_params = cls.load_flax_checkpoint(
-                path=load_path, target=params_target, shard_fns=params_shard_fns
-            )
+                path=load_path,
+                target=params_target,
+                shard_fns=params_shard_fns)
             restored_params = {"params": restored_params}
         else:
             raise ValueError(f"Invalid load_from type: {load_type}")
