@@ -20,7 +20,7 @@ from . import config_lib
 config = config_lib.config_dict(
     load_checkpoint='',
     output_dir='',
-    llama=LLaMAConfigurator.get_default_config(),
+    llama=LLaMAConfigurator.get_standard_llama_config("llama3_8b"),
 )
 
 def match_keywords(string, positives, negatives):
