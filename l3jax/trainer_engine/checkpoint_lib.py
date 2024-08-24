@@ -7,9 +7,9 @@ from flax.traverse_util import flatten_dict, unflatten_dict, empty_node
 import msgpack
 
 from . import config_lib
-from config_lib import config_dict
+from .config_lib import config_dict
 from . import utils
-from utils import tree_apply, float_tensor_to_dtype
+from .utils import tree_apply, float_tensor_to_dtype
 
 
 class Checkpointer(object):

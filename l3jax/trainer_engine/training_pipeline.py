@@ -32,8 +32,8 @@ from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 
 # Local imports
-from . import utils
-from utils import cross_entropy_loss_and_accuracy
+
+from .utils import cross_entropy_loss_and_accuracy
 from . import llama_model
 from . import checkpoint_lib 
 
