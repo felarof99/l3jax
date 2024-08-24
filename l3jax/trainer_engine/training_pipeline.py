@@ -36,7 +36,7 @@ from jax.experimental.pjit import pjit
 from . import utils
 from .utils import cross_entropy_loss_and_accuracy
 from . import llama_model
-from . import checkpoint_lib 
+from . import checkpoint_lib
 
 # Less common imports
 import torch
@@ -51,9 +51,11 @@ from flax import struct
 from flax.training import train_state
 import optax
 
+
 class FelafaxState(train_state.TrainState):
     config: Any
     model: Any
+
 
 class FelafaxModule(ABC):
     @staticmethod
@@ -68,7 +70,9 @@ class FelafaxModule(ABC):
 
     @staticmethod
     @abstractmethod
-    def train_step(state: FelafaxState, rng: Any, batch: Any) -> Tuple[FelafaxState, Any, dict]:
+    def train_step(
+        state: FelafaxState, rng: Any, batch: Any
+    ) -> Tuple[FelafaxState, Any, dict]:
         raise NotImplementedError()
 
     @staticmethod
@@ -90,6 +94,8 @@ class FelafaxModule(ABC):
     @abstractmethod
     def load_checkpoint(path: str, seq_length: int, checkpointer: Any) -> FelafaxState:
         raise NotImplementedError()
+
+
 ########################################################################
 # LlamaModel class implementation
 # now create llama model class that inherits from FelafaxModule
@@ -105,7 +111,9 @@ class LlamaModel(FelafaxModule):
         model = llama_model.LlamaModel(llama_config)
         params = LlamaModel._init_params(rng, config.seq_length, model)
         tx = optax.adam(learning_rate=config.learning_rate)
-        return FelafaxState.create(apply_fn=model.apply, params=params, tx=tx, config=config, model=model)
+        return FelafaxState.create(
+            apply_fn=model.apply, params=params, tx=tx, config=config, model=model
+        )
 
     @staticmethod
     def _init_params(rng: Any, seq_length: int, model: Any) -> Any:
@@ -118,7 +126,9 @@ class LlamaModel(FelafaxModule):
         )
 
     @staticmethod
-    def train_step(state: FelafaxState, rng: Any, batch: Any) -> Tuple[FelafaxState, Any, dict]:
+    def train_step(
+        state: FelafaxState, rng: Any, batch: Any
+    ) -> Tuple[FelafaxState, Any, dict]:
         rng_generator = utils.NextRNG(rng)
         batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
 
@@ -178,7 +188,7 @@ class LlamaModel(FelafaxModule):
                 params=restored_params,
                 tx=dummy_state.tx,
                 config=loaded_state.config,
-                model=dummy_state.model
+                model=dummy_state.model,
             )
         return dummy_state
 
@@ -208,7 +218,9 @@ class Trainer:
         )
 
         self.sharded_train_step = self._get_sharded_train_step(state_shapes_partitioned)
-        self.sharded_create_trainstate = self._get_sharded_create_trainstate(state_shapes_partitioned)
+        self.sharded_create_trainstate = self._get_sharded_create_trainstate(
+            state_shapes_partitioned
+        )
 
     def _get_sharded_train_step(self, state_partitioned):
         return pjit(
@@ -230,9 +242,7 @@ class Trainer:
         with self.mesh:
             if self.config.load_checkpoint:
                 self.state = self.model.load_checkpoint(
-                    self.config.checkpoint_path,
-                    self.config.max_length,
-                    checkpointer
+                    self.config.checkpoint_path, self.config.max_length, checkpointer
                 )
             else:
                 # Initialize state if not loading from checkpoint
@@ -241,9 +251,11 @@ class Trainer:
 
             for epoch in range(self.config.num_epochs):
                 print(f"Starting epoch {epoch} of training...")
-                
+
                 for step, train_batch in enumerate(train_dataloader):
-                    train_batch = jax.device_put(train_batch, NamedSharding(self.mesh, PS()))
+                    train_batch = jax.device_put(
+                        train_batch, NamedSharding(self.mesh, PS())
+                    )
                     sharded_rng = utils.next_rng()
 
                     self.state, sharded_rng, metrics = self.sharded_train_step(
@@ -260,11 +272,15 @@ class Trainer:
 
                 # Evaluation
                 eval_metrics = self._evaluate(eval_dataloader)
-                print(f"Epoch {epoch}, Eval Loss: {eval_metrics['loss']:.4f}, Accuracy: {eval_metrics['accuracy']:.4f}")
+                print(
+                    f"Epoch {epoch}, Eval Loss: {eval_metrics['loss']:.4f}, Accuracy: {eval_metrics['accuracy']:.4f}"
+                )
 
                 # Save checkpoint
                 if epoch % self.config.save_every_n_epochs == 0:
-                    self.model.save_checkpoint(self.state, f"checkpoint_epoch_{epoch}", checkpointer)
+                    self.model.save_checkpoint(
+                        self.state, f"checkpoint_epoch_{epoch}", checkpointer
+                    )
 
     def _evaluate(self, eval_dataloader):
         total_loss = 0
@@ -280,7 +296,7 @@ class Trainer:
 
         return {
             "loss": total_loss / num_batches,
-            "accuracy": total_accuracy / num_batches
+            "accuracy": total_accuracy / num_batches,
         }
 
     def export(self, export_path):
@@ -288,7 +304,8 @@ class Trainer:
         # This could involve converting the model to a specific format,
         # saving it in a deployable state, etc.
         pass
-    
+
+
 def init_fn(rng, model, seq_length, optimizer):
     rng_generator = utils.NextRNG(rng)
     params = model.init(
@@ -359,6 +376,7 @@ def get_sharded_train_step(state_partitioned):
         donate_argnums=(0, 1),
     )
 
+
 def train_loop(
     *,
     model: Any,
@@ -396,7 +414,7 @@ def train_loop(
 
     with mesh:
         state, restored_params = None, None
-        
+
         print("Loading llama JAX model...")
         state, restored_params = checkpointer.load_trainstate_checkpoint(
             "flax_params::" + model_path, state_shapes, shard_fns
@@ -411,7 +429,7 @@ def train_loop(
 
         for epoch in range(training_cfg.num_epochs):
             print(f"Starting epoch {epoch} of training...")
-            
+
             for step, train_batch in enumerate(train_dataloader):
                 # Place the batch on the appropriate devices
                 train_batch = jax.device_put(train_batch, NamedSharding(mesh, PS()))
