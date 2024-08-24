@@ -16,7 +16,7 @@ from transformers.modeling_flax_outputs import FlaxBaseModelOutput, FlaxCausalLM
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 from .utils import with_sharding_constraint
-from trainer_engine import config_lib
+from .config_lib import config_dict
 
 
 class LlamaConfig(object):
@@ -68,7 +68,7 @@ class LlamaConfig(object):
             },
         }
 
-        config = config_lib.config_dict()
+        config = config_dict()
         config.update(base_config)
         if model_name in model_configs:
             config.update(model_configs[model_name])
