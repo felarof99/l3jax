@@ -49,10 +49,5 @@ def setup_imports():
     from datasets import Dataset, load_dataset, concatenate_datasets
     import torch
 
-    # Gemma-specific imports
-    from gemma import params as params_lib
-    from gemma import sampler as sampler_lib
-    from gemma import transformer as transformer_lib
-
     # Return a dictionary of all imported modules
     return locals()

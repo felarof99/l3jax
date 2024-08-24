@@ -7,7 +7,7 @@
 
 # ## Setup 
 
-# In[1]:
+# In[4]:
 
 
 import os
@@ -23,19 +23,50 @@ setup = import_local_module("trainer_engine.setup")
 setup.setup_environment()
 
 
-# In[2]:
+# In[1]:
 
 
-get_ipython().run_cell_magic('capture', '', '!pip install --upgrade kagglehub -q\n!pip install ipywidgets -q\n!pip install torch --index-url https://download.pytorch.org/whl/cpu -q\n!pip install git+https://github.com/felafax/gemma.git -q\n!pip install qax -q\n!pip install jax-lorax -q\n!pip install ipywidgets -q\n!pip install torch --index-url https://download.pytorch.org/whl/cpu -q\n!pip install --upgrade jax -q \n!pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -q\n!pip install "flax[all]" -q\n!pip install --upgrade optax==0.2.2\n!pip install --upgrade einops\n!pip install --no-cache-dir transformers==4.43.3\n!pip install --no-cache-dir datasets==2.18.0\n!pip install --upgrade tqdm\n!pip install --upgrade requests\n!pip install --upgrade typing-extensions\n!pip install --upgrade sentencepiece\n!pip install --upgrade pydantic\n!pip install --upgrade fastapi\n!pip install --upgrade uvicorn\n!pip install --upgrade gradio\n!pip install --upgrade ml_collections\n!pip install --upgrade cloudpickle\n')
+# # PyTorch
+# get_ipython().system('pip install torch --index-url https://download.pytorch.org/whl/cpu -q')
+
+# # JAX ecosystem
+# get_ipython().system('pip install --upgrade jax -q')
+# get_ipython().system('pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -q')
+# get_ipython().system('pip install jax-lorax -q')
+# get_ipython().system('pip install "flax[all]" -q')
+# get_ipython().system('pip install --upgrade optax==0.2.2')
+
+# # Machine learning libraries
+# get_ipython().system('pip install --no-cache-dir transformers==4.43.3')
+# get_ipython().system('pip install --no-cache-dir datasets==2.18.0')
+# get_ipython().system('pip install qax -q')
+
+# # Utility libraries
+# get_ipython().system('pip install --upgrade einops')
+# get_ipython().system('pip install --upgrade tqdm')
+# get_ipython().system('pip install --upgrade requests')
+# get_ipython().system('pip install --upgrade typing-extensions')
+# get_ipython().system('pip install --upgrade sentencepiece')
+# get_ipython().system('pip install --upgrade pydantic')
+# get_ipython().system('pip install --upgrade cloudpickle')
+# get_ipython().system('pip install gcsfs')
+
+# # Web development libraries
+# get_ipython().system('pip install --upgrade fastapi')
+# get_ipython().system('pip install --upgrade uvicorn')
+# get_ipython().system('pip install --upgrade gradio')
+
+# # Configuration management
+# get_ipython().system('pip install --upgrade ml_collections')
 
 
 # In[ ]:
 
 
-get_ipython().system('pip install gcsfs')
 
 
-# In[9]:
+
+# In[5]:
 
 
 globals().update(setup.setup_imports())
@@ -50,7 +81,7 @@ training_pipeline = import_local_module("trainer_engine.training_pipeline")
 
 # ### Select the base model you want to fine-tune 👇
 
-# In[10]:
+# In[6]:
 
 
 # Select a supported model from above list to use!
@@ -61,7 +92,7 @@ model_path = "/mnt/persistent-disk/fax/llama3.1_8b_serialized.flax"
 
 # ### Input your HuggingFace🤗 username and token below
 
-# In[11]:
+# In[7]:
 
 
 hf_model_name = MODEL_NAME
@@ -69,7 +100,7 @@ HUGGINGFACE_USERNAME = input("INPUT: Please provide your HUGGINGFACE_USERNAME: "
 HUGGINGFACE_TOKEN = input("INPUT: Please provide your HUGGINGFACE_TOKEN: ")
 
 
-# In[12]:
+# In[8]:
 
 
 config = AutoConfig.from_pretrained(
@@ -83,7 +114,7 @@ tokenizer = AutoTokenizer.from_pretrained(
 tokenizer.pad_token = tokenizer.eos_token
 
 
-# In[ ]:
+# In[9]:
 
 
 from huggingface_hub import snapshot_download
@@ -96,7 +127,7 @@ model_path = snapshot_download(repo_id=JAX_MODEL_NAME, token=HUGGINGFACE_TOKEN)
 # 
 # It's crucial to include the EOS_TOKEN (End of Sequence Token) in your tokenized output. Failing to do so may result in endless generation loops.
 
-# In[ ]:
+# In[10]:
 
 
 def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
@@ -163,7 +194,7 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
 
 # **Uncomment below code ⬇️ if you'd like to run and test 💯 your dataset pipeline.**
 
-# In[ ]:
+# In[11]:
 
 
 def test_dataset_pipeline(tokenizer):
@@ -177,7 +208,7 @@ test_dataset_pipeline(tokenizer)
 
 # ## Step 2: Train the model by configuring the hyperparameters below.
 
-# In[ ]:
+# In[12]:
 
 
 @chex.dataclass(frozen=True)
@@ -199,7 +230,7 @@ training_cfg = TrainingConfig()
 
 # **NOTE**: The **time-to-first step of training will be slow** because XLA takes time initially to compile the computational graph. However, once the compilation is complete, subsequent steps will run much faster using the compiled and cached graph, leveraging the full power of all TPU cores for accelerated training.
 
-# In[ ]:
+# In[13]:
 
 
 devices = jax.devices()
@@ -208,7 +239,7 @@ device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
 mesh = Mesh(devices=device_mesh, axis_names=('dp', 'fsdp', 'mp'))
 
 
-# In[ ]:
+# In[14]:
 
 
 llama_config = llama_model.LlamaConfig.get_standard_llama_config("llama3_8b")
@@ -221,19 +252,19 @@ model = llama_model.CausalLlamaModule(
 optimizer = optax.sgd(training_cfg.learning_rate)
 
 
-# In[ ]:
+# In[15]:
 
 
 train_dataloader, val_dataloader = get_dataset(tokenizer=tokenizer, max_length=training_cfg.max_length, max_examples=training_cfg.dataset_size_limit)
 
 
-# In[ ]:
+# In[16]:
 
 
 model_path = os.path.join(model_path, "llama3.1_8b_serialized.flax")
 
 
-# In[ ]:
+# In[17]:
 
 
 state = training_pipeline.train_loop(
