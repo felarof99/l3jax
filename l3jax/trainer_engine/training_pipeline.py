@@ -98,6 +98,26 @@ class Trainer:
             self.get_sharded_create_trainstate_from_params(
                 self.state_shapes_partitioned))
 
+        utils.init_rng(99)
+        utils.next_rng()
+
+        # Load checkpoint and create initial state
+        with self.mesh:
+            print("Loading llama JAX model...")
+            
+            _, restored_params = self.checkpointer.load_trainstate_checkpoint(
+                "flax_params::" + self.model_ckpt_path, 
+                self.state_shapes,
+                self.shard_fns)
+            
+            if restored_params is not None:
+                self.train_state = self.sharded_create_trainstate_from_params(
+                    restored_params, 
+                    self.model.apply, 
+                    self.optimizer)
+            else:
+                raise ValueError("Failed to load checkpoint")
+
     @staticmethod
     def init_fn(rng, model, model_config, seq_length, optimizer):
         rng_generator = utils.NextRNG(rng)
@@ -118,10 +138,11 @@ class Trainer:
                 rng=jax.random.PRNGKey(0),
                 model=self.model,
                 model_config=self.model_config,
-                seq_length=self.training_config.max_length,
+                seq_length=self.training_config.seq_length,
                 optimizer=self.optimizer,
             ))
 
+    # TODO: Just apply @jax.jit to this function so that you don' thave to create get sharded create trainstate frm params
     @staticmethod
     def create_trainstate_from_params(params, model_apply_fn, optimizer):
         return TrainState.create(params=params,
@@ -168,23 +189,10 @@ class Trainer:
             donate_argnums=(0, 1),
         )
 
-    def train(self, mesh, train_dataloader):
-        utils.init_rng(99)
-        utils.next_rng()
-
+    def train(self, mesh, state, train_dataloader):
         with mesh:
-            state, restored_params = None, None
-
-            print("Loading llama JAX model...")
-            state, restored_params = self.checkpointer.load_trainstate_checkpoint(
-                "flax_params::" + self.model_ckpt_path, self.state_shapes,
-                self.shard_fns)
-            if restored_params is not None:
-                state = self.sharded_create_trainstate_from_params(
-                    restored_params, self.model.apply, self.optimizer)
-                del restored_params
-            else:
-                raise ValueError("Failed to load checkpoint")
+            if state is None:
+                state = self.train_state
 
             for epoch in range(self.training_config.num_epochs):
                 print(f"Starting epoch {epoch} of training...")
@@ -201,10 +209,11 @@ class Trainer:
                             f"Epoch {epoch}, Step {step}, Train Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.4f}"
                         )
 
-                    if self.training_config.max_steps and step >= self.training_config.max_steps:
+                    if (self.training_config.max_steps and 
+                        step >= self.training_config.max_steps):
                         break
-
-        return state, self.gather_fns
+            self.train_state = state
+        return state 
 
     def save_model(self, state, gather_fns):
         self.checkpointer.save_train_state_to_file(

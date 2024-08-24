@@ -4,6 +4,8 @@
 import os
 import sys
 
+import flax.training
+
 # Add the current directory to the Python path
 sys.path.append("")
 
@@ -49,7 +51,7 @@ model_ckpt_path = snapshot_download(repo_id=JAX_MODEL_NAME,
                                     token=HUGGINGFACE_TOKEN)
 
 
-def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
+def get_dataset(*, tokenizer, batch_size=1, seq_length=32, max_examples=None):
     # Define Alpaca prompt template
     alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
     
@@ -77,7 +79,7 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
             examples["text"],
             truncation=True,
             padding="max_length",
-            max_length=max_length + 1,
+            max_length=seq_length + 1,
         )
         return {
             "input_tokens":
@@ -129,7 +131,7 @@ def test_dataset_pipeline(tokenizer):
     """Print shapes of first batch to verify dataset pipeline."""
     train_loader, _ = get_dataset(tokenizer=tokenizer,
                                   batch_size=1,
-                                  max_length=32,
+                                  seq_length=32,
                                   max_examples=512)
     batch = next(iter(train_loader))
     print("Input tokens shape:", batch["input_tokens"].shape)
@@ -145,7 +147,7 @@ class TrainingConfig:
     num_epochs: int = 1
     max_steps: int | None = 5
     batch_size: int = 32
-    max_length: int = 64
+    seq_length: int = 64
     dataset_size_limit: int | None = 512
     print_every_n_steps: int = 1
 
@@ -171,7 +173,7 @@ optimizer = optax.sgd(training_cfg.learning_rate)
 # Prepare dataset
 train_dataloader, val_dataloader = get_dataset(
     tokenizer=tokenizer,
-    max_length=training_cfg.max_length,
+    seq_length=training_cfg.seq_length,
     max_examples=training_cfg.dataset_size_limit,
 )
 
@@ -189,7 +191,7 @@ trainer = training_pipeline.Trainer(
 )
 
 # Train the model
-state, gather_fns = trainer.train(mesh, train_dataloader)
+state = trainer.train(mesh, trainer.train_state, train_dataloader)
 
 # Save the trained model
-trainer.save_model(state, gather_fns)
+trainer.save_model(state, trainer.gather_fns)
