@@ -59,17 +59,24 @@ class FxTrainState(train_state.TrainState):
 
 class Trainer:
 
-    def __init__(self, model, optimizer, training_config, tokenizer, mesh,
-                 model_path):
+    def __init__(
+        self,
+        model,
+        model_ckpt_path,
+        optimizer,
+        training_config,
+        mesh,
+    ):
         self.model = model
+        self.model_ckpt_path = model_ckpt_path
+
         self.optimizer = optimizer
         self.training_config = training_config
-        self.tokenizer = tokenizer
         self.mesh = mesh
-        self.model_path = model_path
+
         self.checkpointer = checkpoint_lib.Checkpointer(
             checkpoint_lib.Checkpointer.get_default_config(),
-            checkpoint_dir=os.path.dirname(model_path),
+            checkpoint_dir=os.path.dirname(model_ckpt_path),
             enable_checkpointer=jax.process_index() == 0,
         )
 
@@ -142,14 +149,9 @@ class Trainer:
             donate_argnums=(0, 1),
         )
 
-    def train(self, train_dataloader):
+    def train(self, mesh, train_dataloader):
         utils.init_rng(99)
         utils.next_rng()
-
-        devices = jax.devices()
-        device_count = len(devices)
-        device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
-        mesh = Mesh(devices=device_mesh, axis_names=("dp", "fsdp", "mp"))
 
         state_shapes = self.get_state_shapes(self.training_config.max_length)
         state_shapes_partitioned = utils.match_partition_rules(
@@ -166,7 +168,8 @@ class Trainer:
 
             print("Loading llama JAX model...")
             state, restored_params = self.checkpointer.load_trainstate_checkpoint(
-                "flax_params::" + self.model_path, state_shapes, shard_fns)
+                "flax_params::" + self.model_ckpt_path, state_shapes,
+                shard_fns)
             if restored_params is not None:
                 state = sharded_create_trainstate_from_params(
                     restored_params, self.model.apply, self.optimizer)
@@ -198,5 +201,5 @@ class Trainer:
         self.checkpointer.save_train_state_to_file(
             train_state=state,
             gather_fns=gather_fns,
-            path=os.path.join(self.model_path, "trained_llama.flax"),
+            path=os.path.join(self.model_ckpt_path, "trained_llama.flax"),
         )

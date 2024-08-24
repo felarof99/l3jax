@@ -35,7 +35,8 @@ JAX_MODEL_NAME = "felafax/llama-3.1-8B-JAX"
 model_path = "/mnt/persistent-disk/fax/llama3.1_8b_serialized.flax"
 
 # HuggingFace credentials
-HUGGINGFACE_USERNAME = input("INPUT: Please provide your HUGGINGFACE_USERNAME: ")
+HUGGINGFACE_USERNAME = input(
+    "INPUT: Please provide your HUGGINGFACE_USERNAME: ")
 HUGGINGFACE_TOKEN = input("INPUT: Please provide your HUGGINGFACE_TOKEN: ")
 
 # Load config and tokenizer
@@ -78,12 +79,16 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
             max_length=max_length + 1,
         )
         return {
-            "input_tokens": [input_id[:-1] for input_id in tokenized["input_ids"]],
-            "target_tokens": [input_id[1:] for input_id in tokenized["input_ids"]],
-            "loss_masks": [input_id[1:] for input_id in tokenized["attention_mask"]],
+            "input_tokens":
+            [input_id[:-1] for input_id in tokenized["input_ids"]],
+            "target_tokens":
+            [input_id[1:] for input_id in tokenized["input_ids"]],
+            "loss_masks":
+            [input_id[1:] for input_id in tokenized["attention_mask"]],
         }
 
-    def _custom_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, jnp.ndarray]:
+    def _custom_collate_fn(
+            batch: List[Dict[str, Any]]) -> Dict[str, jnp.ndarray]:
         """
         Collates batch items and converts PyTorch tensors to JAX arrays.
         Applies default_data_collator, then converts tensors to JAX format.
@@ -91,9 +96,8 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
         collated = default_data_collator(batch)
         jax_batch = {}
         for key, value in collated.items():
-            jax_batch[key] = (
-                jnp.array(value.numpy()) if isinstance(value, torch.Tensor) else value
-            )
+            jax_batch[key] = (jnp.array(value.numpy()) if isinstance(
+                value, torch.Tensor) else value)
 
         return jax_batch
 
@@ -106,14 +110,14 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
     # Create train and test dataset.
     ds = dataset.train_test_split(test_size=0.15)
     for split in ["train", "test"]:
-        ds[split] = ds[split].map(
-            _tokenize, batched=True, remove_columns=dataset.column_names
-        )
+        ds[split] = ds[split].map(_tokenize,
+                                  batched=True,
+                                  remove_columns=dataset.column_names)
 
     # Create DataLoaders
-    dataloader_args = dict(
-        shuffle=True, batch_size=batch_size, collate_fn=_custom_collate_fn
-    )
+    dataloader_args = dict(shuffle=True,
+                           batch_size=batch_size,
+                           collate_fn=_custom_collate_fn)
     train_dataloader = DataLoader(ds["train"], **dataloader_args)
     test_dataloader = DataLoader(ds["test"], **dataloader_args)
 
@@ -122,9 +126,10 @@ def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
 
 def test_dataset_pipeline(tokenizer):
     """Print shapes of first batch to verify dataset pipeline."""
-    train_loader, _ = get_dataset(
-        tokenizer=tokenizer, batch_size=1, max_length=32, max_examples=512
-    )
+    train_loader, _ = get_dataset(tokenizer=tokenizer,
+                                  batch_size=1,
+                                  max_length=32,
+                                  max_examples=512)
     batch = next(iter(train_loader))
     print("Input tokens shape:", batch["input_tokens"].shape)
     print("Target mask shape:", batch["target_tokens"].shape)
@@ -146,7 +151,7 @@ class TrainingConfig:
 
 training_cfg = TrainingConfig()
 
-# Setup devices and mesh
+# Configure mesh
 devices = jax.devices()
 device_count = len(devices)
 device_mesh = mesh_utils.create_device_mesh((1, device_count, 1))
@@ -172,26 +177,15 @@ train_dataloader, val_dataloader = get_dataset(
 # Update model path
 model_path = os.path.join(model_path, "llama3.1_8b_serialized.flax")
 
-checkpointer = checkpoint_lib.Checkpointer(
-    checkpoint_lib.Checkpointer.get_default_config(),
-    checkpoint_dir=os.path.dirname(model_path),
-    enable_checkpointer=jax.process_index() == 0,
-)
+# Initialize the Trainer
+trainer = training_pipeline.Trainer(model=model,
+                                    optimizer=optimizer,
+                                    training_config=training_cfg,
+                                    mesh=mesh,
+                                    model_path=model_path)
 
 # Train the model
-state, gather_fns = training_pipeline.train_loop(
-    model=model,
-    model_path=model_path,
-    tokenizer=tokenizer,
-    optimizer=optimizer,
-    train_dataloader=train_dataloader,
-    training_cfg=training_cfg,
-    mesh=mesh,
-)
+state, gather_fns = trainer.train(mesh, train_dataloader)
 
-# Export the model
-checkpointer.save_train_state_to_file(
-    train_state=state,
-    gather_fns=gather_fns,
-    path=os.path.join(model_path, "trained_llama.flax"),
-)
+# Save the trained model
+trainer.save_model(state, gather_fns)
