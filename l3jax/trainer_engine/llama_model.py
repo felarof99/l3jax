@@ -11,7 +11,8 @@ from flax.linen.attention import dot_product_attention_weights
 from flax.traverse_util import flatten_dict, unflatten_dict
 from jax.sharding import PartitionSpec as PS
 from transformers.configuration_utils import PretrainedConfig
-from transformers.modeling_flax_outputs import FlaxBaseModelOutput, FlaxCausalLMOutput
+from transformers.modeling_flax_outputs import (FlaxBaseModelOutput,
+                                                FlaxCausalLMOutput)
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 
 from . import config_lib, utils
@@ -125,12 +126,13 @@ class RMSNorm(nn.Module):
         self.weight = self.param(
             "kernel",
             nn.initializers.ones,
-            (self.dim,),
+            (self.dim, ),
             self.param_dtype,
         )
 
     def _norm(self, x: jnp.ndarray) -> jnp.ndarray:
-        return x * jax.lax.rsqrt(jnp.square(x).mean(-1, keepdims=True) + self.eps)
+        return x * jax.lax.rsqrt(
+            jnp.square(x).mean(-1, keepdims=True) + self.eps)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         x = x.astype(jnp.promote_types(self.dtype, jnp.float32))
@@ -150,9 +152,8 @@ def apply_rotary_emb(
 
     with jax.ensure_compile_time_eval():
         dim = xq.shape[-1]
-        freqs = 1.0 / (
-            theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(jnp.float32) / dim)
-        )
+        freqs = 1.0 / (theta**(
+            jnp.arange(0, dim, 2)[:(dim // 2)].astype(jnp.float32) / dim))
         t = jnp.arange(max_pos)
         freqs = jnp.outer(t, freqs).astype(jnp.float32)
         sin, cos = jnp.sin(freqs), jnp.cos(freqs)
@@ -165,15 +166,14 @@ def apply_rotary_emb(
     xq_ = jax.lax.complex(reshape_xq[..., 0], reshape_xq[..., 1])
     xk_ = jax.lax.complex(reshape_xk[..., 0], reshape_xk[..., 1])
     # add head dim
-    freqs_cis = jnp.reshape(freqs_cis, (*freqs_cis.shape[:2], 1, *freqs_cis.shape[2:]))
+    freqs_cis = jnp.reshape(freqs_cis,
+                            (*freqs_cis.shape[:2], 1, *freqs_cis.shape[2:]))
     xq_out = xq_ * freqs_cis
-    xq_out = jnp.stack((jnp.real(xq_out), jnp.imag(xq_out)), axis=-1).reshape(
-        *xq_out.shape[:-1], -1
-    )
+    xq_out = jnp.stack((jnp.real(xq_out), jnp.imag(xq_out)),
+                       axis=-1).reshape(*xq_out.shape[:-1], -1)
     xk_out = xk_ * freqs_cis
-    xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(
-        *xk_out.shape[:-1], -1
-    )
+    xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)),
+                       axis=-1).reshape(*xk_out.shape[:-1], -1)
     return xq_out.astype(input_dtype), xk_out.astype(input_dtype)
 
 
@@ -200,8 +200,7 @@ class Attention(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
         self.wk = nn.Dense(
@@ -210,8 +209,7 @@ class Attention(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
         self.wv = nn.Dense(
@@ -220,8 +218,7 @@ class Attention(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
         self.wo = nn.Dense(
@@ -230,8 +227,7 @@ class Attention(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
 
@@ -271,13 +267,15 @@ class Attention(nn.Module):
             xk,
             "b s (h d) -> b s (h g) d",
             h=self.config.num_key_value_heads,
-            g=self.config.num_attention_heads // self.config.num_key_value_heads,
+            g=self.config.num_attention_heads //
+            self.config.num_key_value_heads,
         )
         xv = einops.repeat(
             xv,
             "b s (h d) -> b s (h g) d",
             h=self.config.num_key_value_heads,
-            g=self.config.num_attention_heads // self.config.num_key_value_heads,
+            g=self.config.num_attention_heads //
+            self.config.num_key_value_heads,
         )
 
         # Apply rotary positional embeddings
@@ -297,7 +295,8 @@ class Attention(nn.Module):
         query_length, key_length = xq.shape[1], xk.shape[1]
         with jax.ensure_compile_time_eval():
             full_causal_mask = make_causal_mask(
-                jnp.ones((1, self.config.max_position_embeddings), dtype="bool"),
+                jnp.ones((1, self.config.max_position_embeddings),
+                         dtype="bool"),
                 dtype="bool",
             )
 
@@ -305,23 +304,20 @@ class Attention(nn.Module):
 
         # Broadcast causal mask to batch size
         batch_size = hidden_states.shape[0]
-        causal_mask = jnp.broadcast_to(
-            causal_mask, (batch_size,) + causal_mask.shape[1:]
-        )
+        causal_mask = jnp.broadcast_to(causal_mask,
+                                       (batch_size, ) + causal_mask.shape[1:])
 
         # Combine attention mask with causal mask and optional FCM mask
         attention_mask = jnp.broadcast_to(
-            jnp.expand_dims(attention_mask, axis=(-3, -2)), causal_mask.shape
-        )
+            jnp.expand_dims(attention_mask, axis=(-3, -2)), causal_mask.shape)
         attention_mask = combine_masks(attention_mask, causal_mask, fcm_mask)
 
         # Convert boolean mask to float mask for attention computation
         attention_bias = jax.lax.select(
             attention_mask > 0,
             jnp.full(attention_mask.shape, 0.0).astype(self.dtype),
-            jnp.full(attention_mask.shape, jnp.finfo(self.dtype).min).astype(
-                self.dtype
-            ),
+            jnp.full(attention_mask.shape,
+                     jnp.finfo(self.dtype).min).astype(self.dtype),
         )
 
         # Compute attention weights
@@ -338,23 +334,25 @@ class Attention(nn.Module):
 
         # Apply sharding constraint to attention weights
         attn_weights = with_sharding_constraint(
-            attn_weights, PS(("dp", "fsdp"), "mp", None, None)
-        )
+            attn_weights, PS(("dp", "fsdp"), "mp", None, None))
 
         # Compute attention output
-        attn_output = jnp.einsum(
-            "...hqk,...khd->...qhd", attn_weights, xv, precision=self.precision
-        )
+        attn_output = jnp.einsum("...hqk,...khd->...qhd",
+                                 attn_weights,
+                                 xv,
+                                 precision=self.precision)
 
         # Reshape attention output and project back to hidden size
         attn_output = einops.rearrange(attn_output, "b s h d -> b s (h d)")
         attn_output = self.wo(attn_output)
 
         # Apply residual dropout
-        attn_output = self.resid_dropout(attn_output, deterministic=deterministic)
+        attn_output = self.resid_dropout(attn_output,
+                                         deterministic=deterministic)
 
         # Prepare output tuple
-        outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
+        outputs = (attn_output,
+                   attn_weights) if output_attentions else (attn_output, )
         return outputs
 
 
@@ -372,8 +370,7 @@ class FeedForward(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
         self.w2 = nn.Dense(
@@ -382,8 +379,8 @@ class FeedForward(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.intermediate_size)
-            ),
+                self.config.initializer_range /
+                np.sqrt(config.intermediate_size)),
             precision=self.precision,
         )
         self.w3 = nn.Dense(
@@ -392,13 +389,14 @@ class FeedForward(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                self.config.initializer_range / np.sqrt(config.hidden_size)
-            ),
+                self.config.initializer_range / np.sqrt(config.hidden_size)),
             precision=self.precision,
         )
         self.dropout = nn.Dropout(rate=self.config.residue_dropout)
 
-    def __call__(self, x: jnp.ndarray, deterministic: bool = True) -> jnp.ndarray:
+    def __call__(self,
+                 x: jnp.ndarray,
+                 deterministic: bool = True) -> jnp.ndarray:
         x = self.w2(nn.silu(self.w1(x)) * self.w3(x))
         x = self.dropout(x, deterministic=deterministic)
         return x
@@ -465,12 +463,11 @@ class TransformerBlock(nn.Module):
             deterministic,
         )
         feed_forward_hidden_states = with_sharding_constraint(
-            feed_forward_hidden_states, PS(("dp", "fsdp"), None, "mp")
-        )
+            feed_forward_hidden_states, PS(("dp", "fsdp"), None, "mp"))
 
         hidden_states = hidden_states + feed_forward_hidden_states
 
-        return (hidden_states,) + attn_outputs[1:]
+        return (hidden_states, ) + attn_outputs[1:]
 
 
 class TransformerBlockCollection(nn.Module):
@@ -488,8 +485,7 @@ class TransformerBlockCollection(nn.Module):
                 dtype=self.dtype,
                 param_dtype=self.param_dtype,
                 precision=self.precision,
-            )
-            for i in range(self.config.num_hidden_layers)
+            ) for i in range(self.config.num_hidden_layers)
         ]
 
     def __call__(
@@ -509,7 +505,7 @@ class TransformerBlockCollection(nn.Module):
 
         for block in self.blocks:
             if output_hidden_states:
-                all_hidden_states += (hidden_states,)
+                all_hidden_states += (hidden_states, )
 
             layer_outputs = block(
                 hidden_states,
@@ -523,7 +519,7 @@ class TransformerBlockCollection(nn.Module):
             hidden_states = layer_outputs[0]
 
             if output_attentions:
-                all_attentions += (layer_outputs[1],)
+                all_attentions += (layer_outputs[1], )
 
         # this contains possible `None` values - `FlaxGPTJModule` will filter them out
         outputs = (hidden_states, all_hidden_states, all_attentions)
@@ -544,8 +540,7 @@ class LlamaModule(nn.Module):
             self.config.vocab_size,
             self.config.hidden_size,
             embedding_init=jax.nn.initializers.normal(
-                stddev=self.config.initializer_range
-            ),
+                stddev=self.config.initializer_range),
             dtype=self.dtype,
             param_dtype=self.param_dtype,
         )
@@ -592,10 +587,10 @@ class LlamaModule(nn.Module):
         hidden_states = self.ln_f(hidden_states)
 
         if output_hidden_states:
-            all_hidden_states = outputs[1] + (hidden_states,)
+            all_hidden_states = outputs[1] + (hidden_states, )
             outputs = (hidden_states, all_hidden_states) + outputs[2:]
         else:
-            outputs = (hidden_states,) + outputs[1:]
+            outputs = (hidden_states, ) + outputs[1:]
 
         if not return_dict:
             return tuple(v for v in outputs if v is not None)
@@ -621,8 +616,8 @@ class CausalLlamaModule(nn.Module):
             param_dtype=self.param_dtype,
             use_bias=False,
             kernel_init=jax.nn.initializers.normal(
-                stddev=self.config.initializer_range / np.sqrt(self.config.hidden_size)
-            ),
+                stddev=self.config.initializer_range /
+                np.sqrt(self.config.hidden_size)),
             precision=self.precision,
         )
 
@@ -660,7 +655,7 @@ class CausalLlamaModule(nn.Module):
         lm_logits = self.lm_head(hidden_states)
 
         if not return_dict:
-            return (lm_logits,) + outputs[1:]
+            return (lm_logits, ) + outputs[1:]
 
         return FlaxCausalLMOutput(
             logits=lm_logits,

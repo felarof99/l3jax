@@ -36,6 +36,7 @@ from jax.sharding import PartitionSpec as PS
 from tqdm import tqdm, trange
 from transformers import AutoTokenizer
 
+from l3jax.llama3.1_train import llama_config
 from . import checkpoint_lib, llama_model, utils
 from .utils import cross_entropy_loss_and_accuracy
 
@@ -63,12 +64,14 @@ class Trainer:
         self,
         model,
         model_ckpt_path,
+        model_config,
         optimizer,
         training_config,
         mesh,
     ):
         self.model = model
         self.model_ckpt_path = model_ckpt_path
+        self.model_config = model_config
 
         self.optimizer = optimizer
         self.training_config = training_config
@@ -80,26 +83,42 @@ class Trainer:
             enable_checkpointer=jax.process_index() == 0,
         )
 
+        # Move the setup code here
+        self.state_shapes = self.get_state_shapes()
+        self.state_shapes_partitioned = utils.match_partition_rules(
+            self.model_config.get_partition_rules(), self.state_shapes)
+
+        self.shard_fns, self.gather_fns = utils.make_shard_and_gather_fns(
+            self.state_shapes_partitioned, self.state_shapes)
+
+        self.sharded_train_step = self.get_sharded_train_step(
+            self.state_shapes_partitioned)
+
+        self.sharded_create_trainstate_from_params = (
+            self.get_sharded_create_trainstate_from_params(
+                self.state_shapes_partitioned))
+
     @staticmethod
-    def init_fn(rng, model, seq_length, optimizer):
+    def init_fn(rng, model, model_config, seq_length, optimizer):
         rng_generator = utils.NextRNG(rng)
         params = model.init(
             input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
-            rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
+            rngs=rng_generator(model_config.rng_keys()),
         )
         return TrainState.create(params=params,
                                  tx=optimizer,
                                  apply_fn=model.apply)
 
-    def get_state_shapes(self, seq_length):
+    def get_state_shapes(self):
         return jax.eval_shape(
             functools.partial(
                 self.init_fn,
                 rng=jax.random.PRNGKey(0),
                 model=self.model,
-                seq_length=seq_length,
+                model_config=self.model_config,
+                seq_length=self.training_config.max_length,
                 optimizer=self.optimizer,
             ))
 
@@ -118,7 +137,7 @@ class Trainer:
         )
 
     @staticmethod
-    def train_step(state, rng, batch):
+    def train_step(state, rng, batch, model_config):
         rng_generator = utils.NextRNG(rng)
         batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
 
@@ -127,7 +146,7 @@ class Trainer:
                 params,
                 batch["input_tokens"],
                 deterministic=False,
-                rngs=rng_generator(llama_model.LlamaConfig.rng_keys()),
+                rngs=rng_generator(model_config.rng_keys()),
             ).logits
             return utils.cross_entropy_loss_and_accuracy(
                 logits, batch["target_tokens"], batch["loss_masks"])
@@ -144,7 +163,7 @@ class Trainer:
     def get_sharded_train_step(self, state_partitioned):
         return pjit(
             functools.partial(self.train_step),
-            in_shardings=(state_partitioned, PS(), PS()),
+            in_shardings=(state_partitioned, PS(), PS(), PS()),
             out_shardings=(state_partitioned, PS(), PS()),
             donate_argnums=(0, 1),
         )
@@ -153,25 +172,15 @@ class Trainer:
         utils.init_rng(99)
         utils.next_rng()
 
-        state_shapes = self.get_state_shapes(self.training_config.max_length)
-        state_shapes_partitioned = utils.match_partition_rules(
-            llama_model.LlamaConfig.get_partition_rules(), state_shapes)
-        shard_fns, gather_fns = utils.make_shard_and_gather_fns(
-            state_shapes_partitioned, state_shapes)
-        sharded_train_step = self.get_sharded_train_step(
-            state_shapes_partitioned)
-        sharded_create_trainstate_from_params = self.get_sharded_create_trainstate_from_params(
-            state_shapes_partitioned)
-
         with mesh:
             state, restored_params = None, None
 
             print("Loading llama JAX model...")
             state, restored_params = self.checkpointer.load_trainstate_checkpoint(
-                "flax_params::" + self.model_ckpt_path, state_shapes,
-                shard_fns)
+                "flax_params::" + self.model_ckpt_path, self.state_shapes,
+                self.shard_fns)
             if restored_params is not None:
-                state = sharded_create_trainstate_from_params(
+                state = self.sharded_create_trainstate_from_params(
                     restored_params, self.model.apply, self.optimizer)
                 del restored_params
             else:
@@ -184,7 +193,7 @@ class Trainer:
                     train_batch = jax.device_put(train_batch,
                                                  NamedSharding(mesh, PS()))
                     sharded_rng = utils.next_rng()
-                    state, sharded_rng, metrics = sharded_train_step(
+                    state, sharded_rng, metrics = self.sharded_train_step(
                         state, sharded_rng, train_batch)
 
                     if step % self.training_config.print_every_n_steps == 0:
@@ -195,7 +204,7 @@ class Trainer:
                     if self.training_config.max_steps and step >= self.training_config.max_steps:
                         break
 
-        return state, gather_fns
+        return state, self.gather_fns
 
     def save_model(self, state, gather_fns):
         self.checkpointer.save_train_state_to_file(

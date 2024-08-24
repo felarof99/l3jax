@@ -32,7 +32,7 @@ globals().update(setup.setup_imports())
 # Model configuration
 MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B"
 JAX_MODEL_NAME = "felafax/llama-3.1-8B-JAX"
-model_path = "/mnt/persistent-disk/fax/llama3.1_8b_serialized.flax"
+model_ckpt_path = "/mnt/persistent-disk/fax/llama3.1_8b_serialized.flax"
 
 # HuggingFace credentials
 HUGGINGFACE_USERNAME = input(
@@ -45,7 +45,8 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=HUGGINGFACE_TOKEN)
 tokenizer.pad_token = tokenizer.eos_token
 
 # Download model
-model_path = snapshot_download(repo_id=JAX_MODEL_NAME, token=HUGGINGFACE_TOKEN)
+model_ckpt_path = snapshot_download(repo_id=JAX_MODEL_NAME,
+                                    token=HUGGINGFACE_TOKEN)
 
 
 def get_dataset(*, tokenizer, batch_size=1, max_length=32, max_examples=None):
@@ -175,14 +176,17 @@ train_dataloader, val_dataloader = get_dataset(
 )
 
 # Update model path
-model_path = os.path.join(model_path, "llama3.1_8b_serialized.flax")
+model_ckpt_path = os.path.join(model_ckpt_path, "llama3.1_8b_serialized.flax")
 
 # Initialize the Trainer
-trainer = training_pipeline.Trainer(model=model,
-                                    optimizer=optimizer,
-                                    training_config=training_cfg,
-                                    mesh=mesh,
-                                    model_path=model_path)
+trainer = training_pipeline.Trainer(
+    model=model,
+    model_ckpt_path=model_ckpt_path,
+    model_config=llama_config,
+    optimizer=optimizer,
+    training_config=training_cfg,
+    mesh=mesh,
+)
 
 # Train the model
 state, gather_fns = trainer.train(mesh, train_dataloader)
