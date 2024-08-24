@@ -73,10 +73,14 @@ class LlamaConfig:
         if model_name in self.model_configs:
             self.config.update(self.model_configs[model_name])
 
+    def get_model_config(self):
+        return self.config
+        
     def get_hf_pretrained_config(self, config):
         """Apply updates on top of standard base model config."""
         # This is where you get pretrained config from huggingface merged with your updates.
-        return PretrainedConfig.from_dict(config)
+        updated_config = config.copy()
+        return PretrainedConfig.from_dict(updated_config)
 
     def rng_keys(self):
         return ("params", "dropout", "fcm")
