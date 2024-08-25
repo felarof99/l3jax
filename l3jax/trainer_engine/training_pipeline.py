@@ -154,7 +154,7 @@ class Trainer:
         )
 
     @staticmethod
-    def train_step(state, rng, batch, model_config):
+    def train_step(state, batch, rng, rng_keys):
         rng_generator = utils.NextRNG(rng)
         batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
 
@@ -163,7 +163,7 @@ class Trainer:
                 params,
                 batch["input_tokens"],
                 deterministic=False,
-                rngs=rng_generator(model_config.rng_keys()),
+                rngs=rng_generator(rng_keys),
             ).logits
             return utils.cross_entropy_loss_and_accuracy(
                 logits, batch["target_tokens"], batch["loss_masks"])
@@ -198,7 +198,8 @@ class Trainer:
                                                  NamedSharding(mesh, PS()))
                     sharded_rng = utils.next_rng()
                     state, sharded_rng, metrics = self.sharded_train_step(
-                        state, sharded_rng, train_batch)
+                        state, train_batch, sharded_rng,
+                        self.model_config.rng_keys())
 
                     if step % self.training_config.print_every_n_steps == 0:
                         print(
