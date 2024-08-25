@@ -67,6 +67,7 @@ class Trainer:
         optimizer,
         training_config,
         mesh,
+        model_params = None,
     ):
         self.model = model
         self.model_ckpt_path = model_ckpt_path
@@ -104,13 +105,14 @@ class Trainer:
         with self.mesh:
             print("Loading llama JAX model...")
 
-            _, restored_params = self.checkpointer.load_trainstate_checkpoint(
-                "flax_params::" + self.model_ckpt_path, self.state_shapes,
-                self.shard_fns)
+            if model_params is None:
+                _, model_params = self.checkpointer.load_trainstate_checkpoint(
+                    "flax_params::" + self.model_ckpt_path, self.state_shapes,
+                    self.shard_fns)
 
-            if restored_params is not None:
+            if model_params is not None:
                 self.train_state = self.sharded_create_trainstate_from_params(
-                    restored_params, self.model.apply, self.optimizer)
+                    model_params, self.model.apply, self.optimizer)
             else:
                 raise ValueError("Failed to load checkpoint")
 
@@ -154,7 +156,7 @@ class Trainer:
         )
 
     @staticmethod
-    def train_step(state, batch, rng, rng_keys):
+    def train_step(state, batch, rng):
         rng_generator = utils.NextRNG(rng)
         batch = utils.with_sharding_constraint(batch, PS(("dp", "fsdp")))
 
@@ -163,7 +165,7 @@ class Trainer:
                 params,
                 batch["input_tokens"],
                 deterministic=False,
-                rngs=rng_generator(rng_keys),
+                rngs=rng_generator(('params', 'dropout', 'fcm')),
             ).logits
             return utils.cross_entropy_loss_and_accuracy(
                 logits, batch["target_tokens"], batch["loss_masks"])
@@ -180,7 +182,7 @@ class Trainer:
     def get_sharded_train_step(self, state_partitioned):
         return pjit(
             functools.partial(self.train_step),
-            in_shardings=(state_partitioned, PS(), PS(), PS()),
+            in_shardings=(state_partitioned, PS(), PS()),
             out_shardings=(state_partitioned, PS(), PS()),
             donate_argnums=(0, 1),
         )
@@ -198,8 +200,7 @@ class Trainer:
                                                  NamedSharding(mesh, PS()))
                     sharded_rng = utils.next_rng()
                     state, sharded_rng, metrics = self.sharded_train_step(
-                        state, train_batch, sharded_rng,
-                        self.model_config.rng_keys())
+                        state, train_batch, sharded_rng)
 
                     if step % self.training_config.print_every_n_steps == 0:
                         print(
