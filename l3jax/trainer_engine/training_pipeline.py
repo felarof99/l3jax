@@ -67,7 +67,7 @@ class Trainer:
         optimizer,
         training_config,
         mesh,
-        model_params = None,
+        model_params=None,
     ):
         self.model = model
         self.model_ckpt_path = model_ckpt_path
@@ -213,9 +213,9 @@ class Trainer:
             self.train_state = state
         return state
 
-    def save_model(self, state, gather_fns):
+    def save_model(self, state, gather_fns, output_path):
         self.checkpointer.save_train_state_to_file(
             train_state=state,
             gather_fns=gather_fns,
-            path=os.path.join(self.model_ckpt_path, "trained_llama.flax"),
+            path=output_path,
         )
