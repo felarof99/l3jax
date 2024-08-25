@@ -18,8 +18,8 @@ from .utils import float_tensor_to_dtype
 from . import config_lib
 
 config = config_lib.config_dict(
-    load_checkpoint='trainstate::/mnt/persistent-disk/hf/models--felafax--llama-3.1-8B-JAX/snapshots/ebca17f216e4c02e0f31cc47264a9d65a4f5b9a9/trained_llama.flax',
-    output_dir='/mnt/persistent-disk/hf/models--felafax--llama-3.1-8B-JAX/snapshots/ebca17f216e4c02e0f31cc47264a9d65a4f5b9a9/hf/',
+    load_checkpoint='trainstate::/mnt/persistent-disk/hf/models--felafax--llama-3.1-8B-JAX/snapshots/ebca17f216e4c02e0f31cc47264a9d65a4f5b9a9/streaming_params',
+    output_dir='/mnt/persistent-disk/easy/e2hf/',
     llama=LLaMAConfigurator("llama3_8b"),
 )
 

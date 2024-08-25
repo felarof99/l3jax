@@ -213,9 +213,9 @@ class Trainer:
             self.train_state = state
         return state
 
-    def save_model(self, state, gather_fns, output_path):
-        self.checkpointer.save_train_state_to_file(
-            train_state=state,
-            gather_fns=gather_fns,
-            path=output_path,
-        )
+    def save_model(self, mesh, state, gather_fns):
+        with mesh:
+            self.checkpointer.save_all(
+                train_state=state,
+                gather_fns=gather_fns,
+            )
