@@ -1,30 +1,25 @@
-import jax
-import jax.numpy as jnp
-from flax import traverse_util
-from flax.core.meta import Partitioned
-from typing import Any, Dict
-
-import os
-import math
-from typing import Any, Mapping, Text, Tuple, Union, NamedTuple
-from functools import partial
-import re
 import dataclasses
+import math
+import os
 import random
-from ml_collections import ConfigDict
-from ml_collections.config_dict.config_dict import placeholder
+import re
+from functools import partial
+from typing import Any, Dict, Mapping, NamedTuple, Text, Tuple, Union
 
 import flax
 import jax
 import jax.numpy as jnp
-from jax.sharding import PartitionSpec as PS
-from jax.sharding import Mesh
+import numpy as np
+from flax import traverse_util
+from flax.core.meta import Partitioned
 from jax.experimental import mesh_utils
 from jax.experimental.pjit import pjit
 from jax.interpreters import pxla
-import numpy as np
-from transformers import FlaxLogitsWarper
 from jax.sharding import Mesh, NamedSharding
+from jax.sharding import PartitionSpec as PS
+from ml_collections import ConfigDict
+from ml_collections.config_dict.config_dict import placeholder
+from transformers import FlaxLogitsWarper
 
 utils_rng = None
 
@@ -65,49 +60,50 @@ class NextRNG(object):
 
 def make_shard_and_gather_fns(partition_specs, dtype_specs=None):
     """Creates pytree of sharding and gathering functions from pytree of partition specs."""
-    
+
     float_dtypes = (jnp.bfloat16, jnp.float16, jnp.float32, jnp.float64)
 
     def make_to_dtype_fn(dtype_spec):
+
         def to_dtype(tensor):
-            if dtype_specs in float_dtypes and getattr(tensor, 'dtype', None) in float_dtypes:
+            if dtype_specs in float_dtypes and getattr(tensor, 'dtype',
+                                                       None) in float_dtypes:
                 # Convert all float tensors to the same dtype
                 return tensor.astype(dtype_specs)
             elif hasattr(dtype_spec, 'dtype') and hasattr(tensor, 'dtype'):
                 return tensor.astype(dtype_spec.dtype)
             return tensor
+
         return to_dtype
 
     def make_shard_fn(partition_spec, dtype_spec=None):
-        jax_shard_function = pjit(
-            make_to_dtype_fn(dtype_spec),
-            in_shardings=None,
-            out_shardings=partition_spec
-        )
+        jax_shard_function = pjit(make_to_dtype_fn(dtype_spec),
+                                  in_shardings=None,
+                                  out_shardings=partition_spec)
+
         def shard_fn(tensor):
             return jax_shard_function(tensor).block_until_ready()
+
         return shard_fn
 
     def make_gather_fn(partition_spec, dtype_spec=None):
-        jax_gather_fn = pjit(
-            make_to_dtype_fn(dtype_spec),
-            in_shardings=partition_spec,
-            out_shardings=None
-        )
+        jax_gather_fn = pjit(make_to_dtype_fn(dtype_spec),
+                             in_shardings=partition_spec,
+                             out_shardings=None)
+
         def gather_fn(tensor):
             return jax.device_get(jax_gather_fn(tensor))
+
         return gather_fn
 
     if dtype_specs is None or dtype_specs in float_dtypes:
         shard_fns = jax.tree_util.tree_map(make_shard_fn, partition_specs)
         gather_fns = jax.tree_util.tree_map(make_gather_fn, partition_specs)
     else:
-        shard_fns = jax.tree_util.tree_map(
-            make_shard_fn, partition_specs, dtype_specs
-        )
-        gather_fns = jax.tree_util.tree_map(
-            make_gather_fn, partition_specs, dtype_specs
-        )
+        shard_fns = jax.tree_util.tree_map(make_shard_fn, partition_specs,
+                                           dtype_specs)
+        gather_fns = jax.tree_util.tree_map(make_gather_fn, partition_specs,
+                                            dtype_specs)
     return shard_fns, gather_fns
 
 
@@ -142,12 +138,13 @@ def with_sharding_constraint(x, partition_specs):
         x = jax.lax.with_sharding_constraint(x, partition_specs)
     return x
 
+
 def cross_entropy_loss_and_accuracy(logits, tokens, valid=None):
     if valid is None:
         valid = jnp.ones(tokens.shape[:2])
     valid = valid.astype(jnp.float32)
     valid_text_length = jnp.maximum(jnp.sum(valid, axis=-1), 1e-10)
-    logits = logits.astype(jnp.float32) # for numerical stability
+    logits = logits.astype(jnp.float32)  # for numerical stability
     token_log_prob = jnp.squeeze(
         jnp.take_along_axis(
             jax.nn.log_softmax(logits, axis=-1),
@@ -158,11 +155,9 @@ def cross_entropy_loss_and_accuracy(logits, tokens, valid=None):
     )
     token_log_prob = jnp.where(valid > 0.0, token_log_prob, jnp.array(0.0))
     loss = -jnp.mean(jnp.sum(token_log_prob, axis=-1) / valid_text_length)
-    correct = jnp.where(
-        valid > 0.0,
-        jnp.argmax(logits, axis=-1) == tokens,
-        jnp.array(False)
-    )
+    correct = jnp.where(valid > 0.0,
+                        jnp.argmax(logits, axis=-1) == tokens,
+                        jnp.array(False))
     accuracy = jnp.mean(jnp.sum(correct, axis=-1) / valid_text_length)
     return loss, accuracy
 
@@ -199,9 +194,9 @@ def float_tensor_to_dtype(tensor, dtype):
 
 
 def float_to_dtype(tree, dtype):
-    return jax.tree_util.tree_map(
-        partial(float_tensor_to_dtype, dtype=dtype), tree
-    )
+    return jax.tree_util.tree_map(partial(float_tensor_to_dtype, dtype=dtype),
+                                  tree)
+
 
 def tree_path_to_string(path, sep=None):
     keys = []
@@ -235,15 +230,16 @@ def named_tree_map(f, tree, *rest, is_leaf=None, sep=None):
     """
     return jax.tree_util.tree_map_with_path(
         lambda path, x, *r: f(tree_path_to_string(path, sep=sep), x, *r),
-        tree, *rest,
-        is_leaf=is_leaf
-    )
+        tree,
+        *rest,
+        is_leaf=is_leaf)
 
 
 def match_partition_rules(rules, params):
     """ Returns a pytree of PartitionSpec according to rules. Supports handling
         Flax TrainState and Optax optimizer state.
     """
+
     def get_partition_spec(name, leaf):
         if len(leaf.shape) == 0 or np.prod(leaf.shape) == 1:
             """ Don't partition scalar values. """
@@ -252,6 +248,7 @@ def match_partition_rules(rules, params):
             if re.search(rule, name) is not None:
                 return ps
         raise ValueError(f'Partition rule not found for param: {name}')
+
     return named_tree_map(get_partition_spec, params, sep='/')
 
 
@@ -266,10 +263,10 @@ def print_params(params: Dict[str, Any]) -> None:
         name = "/".join(str(x) for x in key)
         print(f"Name: {name}")
         print(f"Shape: {value.shape}")
-       
+
         # jax.debug.visualize_array_sharding doesn't work on higher-order arrays.
         if len(value.shape) <= 2:
             array = value.unbox() if isinstance(value, Partitioned) else value
             print(jax.debug.visualize_array_sharding(array))
-        
+
         print("-" * 40)

@@ -16,7 +16,8 @@ import gcsfs
 import numpy as np
 from absl import logging
 from ml_collections import ConfigDict
-from ml_collections.config_dict.config_dict import placeholder as config_placeholder
+from ml_collections.config_dict.config_dict import \
+    placeholder as config_placeholder
 from ml_collections.config_flags import config_flags
 
 
@@ -66,10 +67,12 @@ def get_user_flags(flags, flags_def):
 
     return output
 
+
 def update_config_dict(config, updates=None):
     updated_config = deepcopy(config)
     if updates is not None:
-        updated_config.update(ConfigDict(updates).copy_and_resolve_references())
+        updated_config.update(
+            ConfigDict(updates).copy_and_resolve_references())
     return updated_config
 
 
